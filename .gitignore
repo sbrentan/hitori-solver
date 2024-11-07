@@ -1,2 +1,13 @@
 .vscode
+
+# get rid of all executables
 *.exe
+*.out
+
+# get rid of all the output files
+*.o*
+
+# get rid of all the error files
+*.e*
+
+
