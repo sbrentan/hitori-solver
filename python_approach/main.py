@@ -1,3 +1,4 @@
+import copy
 from enum import Enum
 from log import Log, LogLevel
 
@@ -16,6 +17,26 @@ class HitoriState(Enum):
     VALID = 1
     INVALID = 2
 
+class Combination:
+    rows: dict[int, dict[int, int]]
+    min_row: int
+    max_row: int
+
+    def __init__(self, rows: dict[int, dict[int, int]]):
+        self.rows = rows
+        self.min_row = min(rows.keys())
+        self.max_row = max(rows.keys())
+
+    def __getitem__(self, key: tuple[int, int]) -> int:
+        return self.rows[key[0]][key[1]]
+    
+    def __str__(self):
+        return str(self.rows)
+    
+    @staticmethod
+    def combinations_to_str(combinations) -> str:
+        return str(len(combinations)) + '\n' + '\n'.join([str(c) for c in combinations])
+    
 
 class HitoriSolution:
     def __init__(self, hitori: list[list[int]]):
@@ -259,35 +280,75 @@ class HitoriSolver:
         log.info(self.solution.state)
 
 
-    def combinations_for_row(self, row_id: int = 0, local_position: int = 0) -> list[dict[int, int]]:
-        if local_position == len(self.sorted_row_indexes[row_id]):
-            # TODO: check if count correct?
-            return {}
+    def combinations_for_row(self, row_id: int = 0, local_position: int = 0, transposed: bool = False) -> list[dict[int, int]]:
     
         indexes = self.sorted_row_indexes[row_id]
+
+        local_hitori = self.hitori
+        if transposed:
+            local_hitori = self.cols
+            indexes = self.sorted_col_indexes[row_id]
+
+        if local_position == len(indexes):
+            # TODO: check if count correct?
+            return {}
         
         i = local_position
         idx = indexes[i]
         # if not last cell, check next item if it is the same
-        value = self.hitori[row_id][idx]
+        value = local_hitori[row_id][idx]
         next_value = None
         if i < len(indexes) - 1:
-            next_value = self.hitori[row_id][indexes[i+1]]
+            next_value = local_hitori[row_id][indexes[i+1]]
 
         result_white_selections: list[dict[int, int]] = []
         log.debug(f'row {row_id} idx {idx} value {value}')
         if value == next_value:# or value == prev_value:  # to avoid using the sum values
             log.debug('in')
             forced_solution = None
+            skip_blacks = []
             for k in range(i, len(indexes) + 1):
-                # TODO: check if black in position row_id, indexes[k] is valid, otherwise is a forced solution
-                if False: # forced solution
-                    forced_solution = k  # TODO: check
-                if k == len(indexes) or self.hitori[row_id][indexes[k]] != value:
+                if k == len(indexes) or local_hitori[row_id][indexes[k]] != value:
                     break
 
+                idx_k = indexes[k]
+                if not forced_solution:
+                    # TODO: check if black in position row_id, indexes[k] is valid, otherwise is a forced solution
+                    #       or if the hitori cell is WHITE
+                    #       of if the hitori cell is BLACK, add k to skip_blacks
+
+                    if not transposed:
+                        if self.solution[row_id, idx_k] == CellState.WHITE:
+                            forced_solution = k
+                        elif self.solution[row_id, idx_k] == CellState.BLACK:
+                            skip_blacks.append(k)
+                        else:
+                            if row_id > 0 and self.solution[row_id - 1, idx_k] == CellState.BLACK:
+                                forced_solution = k
+                            elif row_id < len(local_hitori) - 1 and self.solution[row_id + 1, idx_k] == CellState.BLACK:
+                                forced_solution = k
+                            elif idx_k > 0 and self.solution[row_id, idx_k - 1] == CellState.BLACK:
+                                forced_solution = k
+                            elif idx_k < len(local_hitori[0]) - 1 and self.solution[row_id, idx_k + 1] == CellState.BLACK:
+                                forced_solution = k
+                    else:
+                        if self.solution[idx_k, row_id] == CellState.WHITE:
+                            forced_solution = k
+                        elif self.solution[idx_k, row_id] == CellState.BLACK:
+                            skip_blacks.append(k)
+                        else:
+                            if row_id > 0 and self.solution[idx_k, row_id - 1] == CellState.BLACK:
+                                forced_solution = k
+                            elif row_id < len(local_hitori) - 1 and self.solution[idx_k, row_id + 1] == CellState.BLACK:
+                                forced_solution = k
+                            elif idx_k > 0 and self.solution[idx_k - 1, row_id] == CellState.BLACK:
+                                forced_solution = k
+                            elif idx_k < len(local_hitori[0]) - 1 and self.solution[idx_k + 1, row_id] == CellState.BLACK:
+                                forced_solution = k
+
+
             log.debug("k", k)
-            next_white_selections = self.combinations_for_row(row_id, k)
+            next_white_selections = self.combinations_for_row(row_id, k, transposed=transposed)
             
             # Get my solutions
             if forced_solution:
@@ -299,8 +360,10 @@ class HitoriSolver:
 
             log.debug("checking from {i} to {k}".format(i=i, k=k))
             for j in range(start_range, end_range):
+                if j in skip_blacks:
+                    continue
             
-                # from i to k, set solutions
+                # from i to k, set solutionsx0-90
                 if next_white_selections:
                     for next_white_selection in next_white_selections:
                         log.debug("---", {value: indexes[j]})
@@ -310,52 +373,69 @@ class HitoriSolver:
             log.debug("result_white_selections", result_white_selections)
             return result_white_selections
         else:
-            r = self.combinations_for_row(row_id, i+1)
+            r = self.combinations_for_row(row_id, i+1, transposed=transposed)
             log.debug(f"{local_position}: r for {row_id} and {i+1}", r)
             return r
-            
-    def aggregate_solutions(self, row, row2, solutions: list[dict[int, int]], solutions2: list[dict[int, int]]) -> list[dict[int, dict[int, int]]]:
-        # this function does not check for previously set black cells (directly on the hitori)
-        # it is expected that the generated solutions are valid
 
-        # !!=== CHANGE THE AGGREGATION TO MANAGE MULTIPLE ROWS AND NOT ONLY 2 ===!!
+    def aggregate_multi(self, combinations: list[list[Combination]], local_position: int = 0, transposed: bool = False) -> list[Combination]:
+        # expects a list of adjacent rows combinations ([{0, 1}, {0, 1}], [{2, 3}], ....)
+        # expects non overlapping combinations
+        if local_position == len(combinations):
+            return []
+        local_combinations = []
+        my_combinations = combinations[local_position]
+        next_combinations = self.aggregate_multi(combinations, local_position + 1)
 
-        result = []
-        for solution in solutions:
-            for solution2 in solutions2:
-                skip = False
-                for k, v in solution.items():
-                    # If same value in the same column, break
-                    if k in solution2 and solution2[k] == v:
-                        skip = True
-                        break
-                if skip: continue
+        local_hitori = self.hitori
+        if transposed:
+            local_hitori = self.cols
 
-                # check if any black cell is in the same column
-                for i in range(len(self.hitori[row])):
-                    value = self.hitori[row][i]
-                    value2 = self.hitori[row2][i]
-                    if value in solution and solution[value] != i:  # i for solution is black
-                        if value2 in solution2 and solution2[value2] != i:  # i for solution2 is black
-                            skip = True
-                            break
-                if skip: continue
+        if next_combinations:
+            for next_combination in next_combinations:
+                for my_combination in my_combinations:
+                    skip = False
 
-                new_result = {
-                    row: solution,
-                    row2: solution2
-                }
-                result.append(new_result)
-        return result
+                    # check value sums vertically
+                    # ========== CANT CHECK BECAUSE WE NEED TO CONSIDER UNKNOWNS ==========
+                    # for col in range(len(self.hitori[0])):
+                    #     values_to_check = []
+                    #     for row in my_combination.rows.keys():
+                    #         values_to_check.append(self.hitori[row][col])
+                    #     for row in next_combination.rows.keys():
+                    #         if self.hitori[row][col] in values_to_check:
+                    #             skip = True
+                    #             break
+                    #     if skip: break
+                    # if skip: continue
 
-    def solve(self):
-        log.info('================= Solving Hitori =================')
-        log.info(self)
+                    # check if any black cell is in the same column
+                    row1 = my_combination.max_row
+                    row2 = next_combination.min_row
+                    # if row1 + 1 != row2:
+                    #     raise Exception("Invalid combination rows " + str(row1) + " " + str(row2))
+                    for i in range(len(local_hitori[row1])):
+                        value = local_hitori[row1][i]
+                        value2 = local_hitori[row2][i]
+                        a = my_combination.rows[row1]
+                        # i for row is black
+                        if self.solution[row1, i] == CellState.BLACK or (value in my_combination.rows[row1] and my_combination[row1, value] != i):
+                            # i for row2 is black
+                            if self.solution[row2, i] == CellState.BLACK or (value2 in next_combination.rows[row2] and next_combination[row2, value2] != i):
+                                skip = True
+                                break
+                    if skip:
+                        continue
 
-        rows_count = [{i: row.count(i) for i in set(row)} for row in self.hitori]
-        cols_count = [{i: col.count(i) for i in set(col)} for col in [[row[i] for row in self.hitori] for i in range(len(self.cols))]]
-        self._pruning(rows_count, cols_count)
+                    # union of combinations
+                    new_combination_rows = {**my_combination.rows, **next_combination.rows}
+                    new_combination = Combination(new_combination_rows)
+                    local_combinations.append(new_combination)
+            return local_combinations
+        else:
+            return my_combinations
+        
 
+    def test_combinations(self):
         # keep only row values bigger than 1
         rows_count = [{k: v for k, v in row.items() if v > 1} for row in rows_count]
         log.debug(rows_count)
@@ -370,54 +450,202 @@ class HitoriSolver:
         log.debug("sum", s)
         log.debug()
 
-        log.info("sorted_row_indexes", self.sorted_row_indexes)
-        log.info('\n================= Combinations =================')
-        solutions = self.combinations_for_row()
-        solutions2 = self.combinations_for_row(1)
-        solutions3 = self.combinations_for_row(2)
-        solutions4 = self.combinations_for_row(3)
-        log.info("\ncombinations for row 1:\n", solutions)
-        log.info("\ncombinations for row 2:\n", solutions2)
-        log.info("\ncombinations for row 3:\n", solutions3)
-        log.info("\ncombinations for row 4:\n", solutions4)
 
-        aggregations = self.aggregate_solutions(0, 1, solutions, solutions2)
-        aggregations2 = self.aggregate_solutions(2, 3, solutions3, solutions4)
-        log.info("\naggregate_solutions for row 1 and 2:\n", aggregations)
-        log.info("\naggregate_solutions for row 3 and 4:\n", aggregations2)
+    def process_cells(self, transposed: bool = False) -> list[Combination]:
+        log.info('\n================= Row Combinations =================')
 
-        aggr = aggregations[0]
-        log.info("\naggr", aggr)
+        # divide rows by three
+        # step = 4
+        # list_to_check = self.hitori
+        # temp = True
+        # while(len(list_to_check) > step):
+        #     multi = []
+        #     print('a')
+        #     for i in range(0, len(list_to_check) - 1, step):
+        #         if temp:
+        #             sol = self.combinations_for_row(i, transposed=transposed)
+        #             sol = [Combination({i: s}) for s in sol]
+        #             sol2 = self.combinations_for_row(i + 1, transposed=transposed)
+        #             sol2 = [Combination({i+1: s}) for s in sol2]
+        #             multi.append(self.aggregate_multi([sol, sol2]))
+        #         else:
+        #             multi.append(self.aggregate_multi(list_to_check[i:i+step]))
+        #     temp = False
+        #     list_to_check = multi
+
+        # multi_multi = self.aggregate_multi(list_to_check, transposed=transposed)
+        # if len(self.hitori) % 2 != 0:
+        #     last_sol = self.combinations_for_row(len(self.hitori) - 1, transposed=transposed)
+        #     last_sol = [Combination({len(self.hitori) - 1: s}) for s in last_sol]
+        #     mmm = self.aggregate_multi([multi_multi, last_sol])
+        # else:
+        #     mmm = list_to_check
+
+
+
+
+        
+
+        solutions = self.combinations_for_row(transposed=transposed)
+        solutions2 = self.combinations_for_row(1, transposed=transposed)
+        solutions3 = self.combinations_for_row(2, transposed=transposed)
+        solutions4 = self.combinations_for_row(3, transposed=transposed)
+        solutions5 = self.combinations_for_row(4, transposed=transposed)
+        log.debug("\ncombinations for row 1:\n", solutions)
+        log.debug("\ncombinations for row 2:\n", solutions2)
+        log.debug("\ncombinations for row 3:\n", solutions3)
+        log.debug("\ncombinations for row 4:\n", solutions4)
+        log.debug("\ncombinations for row 5:\n", solutions5)
+
+        solutions = [Combination({0: s}) for s in solutions]
+        solutions2 = [Combination({1: s}) for s in solutions2]
+        multi = self.aggregate_multi([solutions, solutions2])
+  
+        solutions3 = [Combination({2: s}) for s in solutions3]
+        solutions4 = [Combination({3: s}) for s in solutions4]
+        multi2 = self.aggregate_multi([solutions3, solutions4])
+
+        multi_multi = self.aggregate_multi([multi, multi2])
+
+        solutions5 = [Combination({4: s}) for s in solutions5]
+        mmm = self.aggregate_multi([multi_multi, solutions5])
+        log.info("\naggregate_multi:\n", Combination.combinations_to_str(mmm))
+        return mmm
+
+
+
+
+
+        # solutions = self.combinations_for_row(transposed=transposed)
+        # solutions2 = self.combinations_for_row(1, transposed=transposed)
+        # solutions3 = self.combinations_for_row(2, transposed=transposed)
+        # solutions4 = self.combinations_for_row(3, transposed=transposed)
+        # solutions5 = self.combinations_for_row(4, transposed=transposed)
+        # solutions6 = self.combinations_for_row(4, transposed=transposed)
+        # solutions7 = self.combinations_for_row(4, transposed=transposed)
+        # solutions8 = self.combinations_for_row(4, transposed=transposed)
+        # solutions9 = self.combinations_for_row(4, transposed=transposed)
+        # log.debug("\ncombinations for row 1:\n", solutions)
+        # log.debug("\ncombinations for row 2:\n", solutions2)
+        # log.debug("\ncombinations for row 3:\n", solutions3)
+        # log.debug("\ncombinations for row 4:\n", solutions4)
+        # log.debug("\ncombinations for row 5:\n", solutions5)
+        # log.debug("\ncombinations for row 6:\n", solutions6)
+        # log.debug("\ncombinations for row 7:\n", solutions7)
+        # log.debug("\ncombinations for row 8:\n", solutions8)
+        # log.debug("\ncombinations for row 9:\n", solutions9)
+
+        # solutions = [Combination({0: s}) for s in solutions]
+        # solutions2 = [Combination({1: s}) for s in solutions2]
+        # multi = self.aggregate_multi([solutions, solutions2])
+  
+        # solutions3 = [Combination({2: s}) for s in solutions3]
+        # solutions4 = [Combination({3: s}) for s in solutions4]
+        # multi2 = self.aggregate_multi([solutions3, solutions4])
+
+        # multi_multi = self.aggregate_multi([multi, multi2])
+
+        # solutions5 = [Combination({4: s}) for s in solutions5]
+        # solutions6 = [Combination({5: s}) for s in solutions6]
+        # multi3 = self.aggregate_multi([solutions5, solutions6])
+  
+        # solutions7 = [Combination({6: s}) for s in solutions7]
+        # solutions8 = [Combination({7: s}) for s in solutions8]
+        # multi4 = self.aggregate_multi([solutions7, solutions8])
+
+        # multi_multi = self.aggregate_multi([multi3, multi4])
+
+        # mmm = self.aggregate_multi([multi_multi, multi_multi])
+
+        # solutions9 = [Combination({8: s}) for s in solutions9]
+        # mmm2 = self.aggregate_multi([mmm, solutions9])
+        # log.info("\naggregate_multi:\n", Combination.combinations_to_str(mmm2))
+
+        # return mmm2
+
+
+    def validate_combination(self, combination: Combination, transposed: bool = False) -> bool:
+        local_hitori = self.hitori
+        if transposed:
+            local_hitori = self.cols
+
+        solution_copy = copy.deepcopy(self.solution)
 
         # check if any black cell is in the same column
-        for row in range(2):
-            for col in range(len(self.hitori[row])):
-                value = self.hitori[row][col]
-                print(row, col, value, aggr[row])
-                if value in aggr[row]:
-                    if aggr[row][value] == col:
-                        self.solution[row, col] = CellState.WHITE
+        for row in range(len(local_hitori)):
+            for col in range(len(local_hitori[row])):
+                value = local_hitori[row][col]
+                if row in combination.rows and value in combination.rows[row]:
+                    if combination[row, value] == col:
+                        if not transposed: solution_copy[row, col] = CellState.WHITE
+                        else: solution_copy[col, row] = CellState.WHITE
                     else:
-                        self.solution[row, col] = CellState.BLACK
+                        if not transposed: solution_copy[row, col] = CellState.BLACK
+                        else: solution_copy[col, row] = CellState.BLACK
 
-        aggr = aggregations2[0]
-        log.info("\naggr", aggr)
+        log.info("Combination state", solution_copy.state)
+        log.info(solution_copy)
 
-        # check if any black cell is in the same column
-        for row in range(2, 4):
-            for col in range(len(self.hitori[row])):
-                value = self.hitori[row][col]
-                print(row, col, value, aggr[row])
-                if value in aggr[row]:
-                    if aggr[row][value] == col:
-                        self.solution[row, col] = CellState.WHITE
+
+    def solve(self):
+        log.info('================= Solving Hitori =================')
+        log.info(self)
+
+        rows_count = [{i: row.count(i) for i in set(row)} for row in self.hitori]
+        cols_count = [{i: col.count(i) for i in set(col)} for col in [[row[i] for row in self.hitori] for i in range(len(self.cols))]]
+        self._pruning(rows_count, cols_count)
+        
+        row_combinations = self.process_cells()
+        col_combinations = self.process_cells(transposed=True)
+
+        for row_combination in row_combinations:
+            # create a copy of the solution
+            copy_solution = HitoriSolution(self.hitori)
+            for i in range(self.solution.rows):
+                for j in range(self.solution.cols):
+                    if self.solution[i, j] == CellState.UNKNOWN:
+                        # apply row_combination white and black cells
+                        value = self.hitori[i][j]
+                        if value in row_combination.rows[i]:
+                            if row_combination[i, value] == j:
+                                copy_solution[i, j] = CellState.WHITE
+                            else:
+                                copy_solution[i, j] = CellState.BLACK
                     else:
-                        self.solution[row, col] = CellState.BLACK
+                        copy_solution[i, j] = self.solution[i, j]
+            # print("row_solution\n" + str(copy_solution))
+            # checking if col_combination fits row_combination
+            for col_combination in col_combinations:
+                skip = False
+                moves = []
+                for col, col_values in col_combination.rows.items():
+                    for i in range(len(self.hitori)):
+                        value = self.hitori[i][col]
+                        if value in col_values:
+                            col_value = col_values[value]  # index of white element with value=value
+                            if col_value == i:
+                                col_combination_value = CellState.WHITE
+                            else:
+                                col_combination_value = CellState.BLACK
+                            if copy_solution[i, col] == CellState.UNKNOWN:
+                                copy_solution[i, col] = col_combination_value
+                                moves.append((i, col, col_combination_value))
+                            elif copy_solution[i, col] != col_combination_value:
+                                    skip = True
+                                    break
+                    if skip: break
+                if skip: continue
+                for move in moves:
+                    copy_solution[move[0], move[1]] = move[2]
+                if not skip:
+                    print("copy_solution\n" + str(copy_solution))
+                    print("state", copy_solution.state)
+                    input()
 
         log.info('\n\n================= Solution =================')
-        log.info(self.solution)
-        log.info(self.solution.state)
-        
+        self.validate_combination(row_combinations[12])  # 2, 5, 11, 12
+        self.validate_combination(col_combinations[5], transposed=True)  # 5, 13
+
 
 ex1 = [
     [3, 2, 2],
@@ -432,4 +660,45 @@ ex2 = [
     [3, 4, 1, 2, 3],
     [1, 5, 2, 4, 1]
 ]
-HitoriSolver(ex2).solve()
+
+"""
+ex2 soluion:
+    X O O O O
+    O O X O X
+    O X O O O
+    O O O O X
+    X O X O O
+"""
+
+ex3 = [
+    [3, 9, 2, 4, 7, 7, 8, 1, 6],
+    [9, 5, 1, 2, 6, 8, 7, 4, 2],
+    [4, 9, 3, 8, 3, 7, 7, 5, 1],
+    [1, 7, 6, 4, 1, 5, 1, 9, 1],
+    [1, 9, 9, 7, 8, 6, 5, 3, 2],
+    [7, 8, 1, 4, 3, 1, 9, 6, 9],
+    [8, 9, 7, 5, 9, 3, 1, 8, 4],
+    [6, 2, 9, 1, 5, 1, 3, 8, 8],
+    [7, 1, 8, 6, 9, 2, 9, 7, 3],
+]
+
+ex4 = [
+    [1, 1, 5, 4, 4],
+    [5, 1, 2, 3, 2],
+    [2, 5, 3, 1, 3],
+    [2, 4, 1, 2, 5],
+    [4, 4, 2, 5, 3],
+]
+
+"""
+ex2 soluion:
+    O X O O X
+    O O X O O
+    X O O O X
+    O O O X O
+    O X O O O
+
+{0: {1: 1, 4: 4}, 1: {2: 2}, 2: {3: 4}, 3: {2: 3}, 4: {4: 1}} row aggregation not present
+"""
+HitoriSolver(ex4).solve()
+
