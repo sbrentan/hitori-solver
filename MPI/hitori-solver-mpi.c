@@ -339,8 +339,11 @@ struct Board mpi_uniqueness_rule(struct Board board, int size, int rank) {
 
     struct Board solution = {0};
 
-    if (rank == 0)
+    if (rank == 0) {
         solution = combine_partial_solutions(board, row_solution, col_solution, "Uniqueness", true);
+
+        if (DEBUG) print_board("Uniqueness Rule [Combined]", solution, SOLUTION);
+    }
 
     free(local_row);
     free(counts_send_row);
@@ -379,20 +382,19 @@ struct Board mpi_sandwich_rules(struct Board board, int size, int rank) {
 
                 // 222 --> XOX
                 // 212 --> ?O?
-                if (local_row_solution[i * board.cols_count + j] == UNKNOWN &&
-                    local_row_solution[i * board.cols_count + j + 1] == UNKNOWN &&
-                    local_row_solution[i * board.cols_count + j + 2] == UNKNOWN) {
+                if (value1 == value2 && value2 == value3) {
+                    local_row_solution[i * board.cols_count + j] = BLACK;
+                    local_row_solution[i * board.cols_count + j + 1] = WHITE;
+                    local_row_solution[i * board.cols_count + j + 2] = BLACK;
 
-                    if (value1 == value2 && value2 == value3) {
-                        local_row_solution[i * board.cols_count + j] = BLACK;
-                        local_row_solution[i * board.cols_count + j + 1] = WHITE;
-                        local_row_solution[i * board.cols_count + j + 2] = BLACK;
-                    } else if (value1 != value2 && value1 == value3) {
-                        local_row_solution[i * board.cols_count + j] = UNKNOWN;
-                        local_row_solution[i * board.cols_count + j + 1] = WHITE;
-                        local_row_solution[i * board.cols_count + j + 2] = UNKNOWN;
-                    } 
-                }
+                    if (j - 1 >= 0) local_col_solution[i * board.rows_count + j - 1] = WHITE;
+                    if (j + 3 < board.rows_count) local_col_solution[i * board.rows_count + j + 3] = WHITE;
+
+                } else if (value1 != value2 && value1 == value3) {
+                    local_row_solution[i * board.cols_count + j] = UNKNOWN;
+                    local_row_solution[i * board.cols_count + j + 1] = WHITE;
+                    local_row_solution[i * board.cols_count + j + 2] = UNKNOWN;
+                } 
             }
         }
     }
@@ -406,19 +408,18 @@ struct Board mpi_sandwich_rules(struct Board board, int size, int rank) {
                 int value3 = local_col[i * board.rows_count + j + 2];
 
                 // 222 --> XOX
-                if (local_col_solution[i * board.rows_count + j] == UNKNOWN &&
-                    local_col_solution[i * board.rows_count + j + 1] == UNKNOWN &&
-                    local_col_solution[i * board.rows_count + j + 2] == UNKNOWN) {
+                if (value1 == value2 && value2 == value3) {
+                    local_col_solution[i * board.rows_count + j] = BLACK;
+                    local_col_solution[i * board.rows_count + j + 1] = WHITE;
+                    local_col_solution[i * board.rows_count + j + 2] = BLACK;
 
-                    if (value1 == value2 && value2 == value3) {
-                        local_col_solution[i * board.rows_count + j] = BLACK;
-                        local_col_solution[i * board.rows_count + j + 1] = WHITE;
-                        local_col_solution[i * board.rows_count + j + 2] = BLACK;
-                    } else if (value1 != value2 && value1 == value3) {
-                        local_col_solution[i * board.rows_count + j] = UNKNOWN;
-                        local_col_solution[i * board.rows_count + j + 1] = WHITE;
-                        local_col_solution[i * board.rows_count + j + 2] = UNKNOWN;
-                    }
+                    if (j - 1 >= 0) local_col_solution[i * board.rows_count + j - 1] = WHITE;
+                    if (j + 3 < board.rows_count) local_col_solution[i * board.rows_count + j + 3] = WHITE;
+
+                } else if (value1 != value2 && value1 == value3) {
+                    local_col_solution[i * board.rows_count + j] = UNKNOWN;
+                    local_col_solution[i * board.rows_count + j + 1] = WHITE;
+                    local_col_solution[i * board.rows_count + j + 2] = UNKNOWN;
                 }
             }
         }
@@ -430,8 +431,11 @@ struct Board mpi_sandwich_rules(struct Board board, int size, int rank) {
 
     struct Board solution = {0};
 
-    if (rank == 0)
+    if (rank == 0) {
         solution = combine_partial_solutions(board, row_solution, col_solution, "Sandwich", false);
+
+        if (DEBUG) print_board("Sandwich Rules [Combined]", solution, SOLUTION);
+    }
     
     free(local_row);
     free(counts_send_row);
@@ -445,13 +449,116 @@ struct Board mpi_sandwich_rules(struct Board board, int size, int rank) {
     return solution;
 }
 
-void mpi_isolated_black(); // Neighbors of black cells are white ?????
+struct Board mpi_pair_isolation(struct Board board, int size, int rank) {
+    
+    int *local_row, *counts_send_row, *displs_send_row;
+    mpi_scatter_board(board, size, rank, ROWS, &local_row, &counts_send_row, &displs_send_row);
 
-void mpi_pair_isolation(); // 22??2? --> 22?OXO
+    int *local_col, *counts_send_col, *displs_send_col;
+    mpi_scatter_board(board, size, rank, COLS, &local_col, &counts_send_col, &displs_send_col);
+
+    int i, j, k;
+    int local_row_solution[counts_send_row[rank]];
+    int local_col_solution[counts_send_col[rank]];
+
+    memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
+    memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
+
+    // For each local row, check if there are pairs of values
+    for (i = 0; i < (counts_send_row[rank] / board.cols_count); i++) {
+        for (j = 0; j < board.cols_count; j++) {
+            if (j < board.cols_count - 1) {
+                int value1 = local_row[i * board.cols_count + j];
+                int value2 = local_row[i * board.cols_count + j + 1];
+
+                if (value1 == value2) {
+                    // Found a pair of values next to each other, mark all the other single values as black
+
+                    for (k = 0; k < board.cols_count; k++) {
+                        int single = local_row[i * board.cols_count + k];
+                        bool isolated = true;
+                        
+                        if (k != j && k != j + 1 && single == value1) {
+
+                            // Check if the value3 is isolated
+                            if (k - 1 >= 0 && local_row[i * board.cols_count + k - 1] == single) isolated = false;
+                            if (k + 1 < board.cols_count && local_row[i * board.cols_count + k + 1] == single) isolated = false;
+
+                            if (isolated) {
+                                local_row_solution[i * board.cols_count + k] = BLACK;
+
+                                if (k - 1 >= 0) local_row_solution[i * board.cols_count + k - 1] = WHITE;
+                                if (k + 1 < board.cols_count) local_row_solution[i * board.cols_count + k + 1] = WHITE;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // For each local column, check if there are pairs of values
+    for (i = 0; i < (counts_send_col[rank] / board.rows_count); i++) {
+        for (j = 0; j < board.rows_count; j++) {
+            if (j < board.rows_count - 1) {
+                int value1 = local_col[i * board.rows_count + j];
+                int value2 = local_col[i * board.rows_count + j + 1];
+
+                if (value1 == value2) {
+                    // Found a pair of values next to each other, mark all the other single values as black
+
+                    for (k = 0; k < board.rows_count; k++) {
+                        int single = local_col[i * board.rows_count + k];
+                        bool isolated = true;
+                        
+                        if (k != j && k != j + 1 && single == value1) {
+
+                            // Check if the value3 is isolated
+                            if (k - 1 >= 0 && local_col[i * board.rows_count + k - 1] == single) isolated = false;
+                            if (k + 1 < board.rows_count && local_col[i * board.rows_count + k + 1] == single) isolated = false;
+
+                            if (isolated) {
+                                local_col_solution[i * board.rows_count + k] = BLACK;
+
+                                if (k - 1 >= 0) local_col_solution[i * board.rows_count + k - 1] = WHITE;
+                                if (k + 1 < board.rows_count) local_col_solution[i * board.rows_count + k + 1] = WHITE;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    int *row_solution, *col_solution;
+    mpi_gather_board(board, rank, ROWS, local_row_solution, counts_send_row, displs_send_row, &row_solution);
+    mpi_gather_board(board, rank, COLS, local_col_solution, counts_send_col, displs_send_col, &col_solution);
+
+    struct Board solution = {0};
+
+    if (rank == 0) {
+        solution = combine_partial_solutions(board, row_solution, col_solution, "Pair Isolation", false);
+
+        if (DEBUG) print_board("Pair Isolation [Combined]", solution, SOLUTION);
+    }
+    
+    free(local_row);
+    free(counts_send_row);
+    free(displs_send_row);
+    free(local_col);
+    free(counts_send_col);
+    free(displs_send_col);
+    free(row_solution);
+    free(col_solution);
+
+    return solution;
+}
 
 void mpi_flanked_isolation(); // 2332 2 3 --> 2332?X?X
 
 void mpi_corner_cases();
+
+void mpi_isolated_black(); // Check wheter the neighbors of a black cell are white
 
 /* ------------------ MAIN ------------------ */
 
@@ -498,20 +605,24 @@ int main(int argc, char** argv) {
         Apply the techniques to the board.
     */
 
-    struct Board uniqueness_solution = mpi_uniqueness_rule(board, size, rank);
+    struct Board (*techniques[])(struct Board, int, int) = {
+        mpi_uniqueness_rule,
+        mpi_sandwich_rules,
+        mpi_pair_isolation
+    };
 
-    if (DEBUG && rank == 0) print_board("Uniqueness Rule [Combined]", uniqueness_solution, SOLUTION);
+    int num_techniques = sizeof(techniques) / sizeof(techniques[0]);
 
-    struct Board sandwich_solution = mpi_sandwich_rules(board, size, rank);
-
-    if (DEBUG && rank == 0) print_board("Sandwich Rules [Combined]", sandwich_solution, SOLUTION);
-
-    struct Board final_solution = combine_board_solutions(uniqueness_solution, sandwich_solution, false);
-
-    if (DEBUG && rank == 0) print_board("Final", final_solution, SOLUTION);
+    int i;
+    struct Board final_solution = techniques[0](board, size, rank);
+    for (i = 1; i < num_techniques; i++) {
+        final_solution = combine_board_solutions(final_solution, techniques[i](board, size, rank), false);
+    }
 
     if (rank == 0) {
         write_solution(final_solution);
+
+        if (DEBUG) print_board("Final", final_solution, SOLUTION);
     }
 
     MPI_Finalize();
