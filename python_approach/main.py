@@ -1,5 +1,6 @@
 import copy
 from enum import Enum
+import os
 from log import Log, LogLevel
 
 log = Log(LogLevel.INFO)
@@ -11,6 +12,9 @@ class CellState(Enum):
 
     def __str__(self):
         return 'X' if self == CellState.BLACK else 'O' if self == CellState.WHITE else '?'
+    
+    def __repr__(self):
+        return self.__str__()
     
 class HitoriState(Enum):
     SOLVED = 0
@@ -31,11 +35,14 @@ class Combination:
         return self.rows[key[0]][key[1]]
     
     def __str__(self):
-        return str(self.rows)
+        return str(self.rows) + f'[{self.min_row} - {self.max_row}]'
+    
+    def __repr__(self):
+        return self.__str__()
     
     @staticmethod
     def combinations_to_str(combinations) -> str:
-        return str(len(combinations)) + '\n' + '\n'.join([str(c) for c in combinations])
+        return f'{str(len(combinations))}\n' + '\n'.join([str(c) for c in combinations])
     
 
 class HitoriSolution:
@@ -207,13 +214,13 @@ class HitoriSolver:
                 #         IGNORES unknown cells
                 if i < len(self.rows) - 2 and self.hitori[i+1][j] == self.hitori[i+2][j] == value:
                     for k in range(len(self.cols)):
-                        if self.hitori[k][j] == value:
+                        if self.hitori[k][j] == value and k != i+1:
                             self.solution[k, j] = CellState.BLACK
                             black_cells.append((k, j))
                     self.solution[i+1, j] = CellState.WHITE
                 if j < len(self.cols) - 2 and self.hitori[i][j+1] == self.hitori[i][j+2] == value:
-                    for k in range(len(self.rows)):
-                        if self.hitori[i][k] == value:
+                    for k in range(len(self.rows[0])):
+                        if self.hitori[i][k] == value and k != j+1:
                             self.solution[i, k] = CellState.BLACK
                             black_cells.append((i, k))
                     self.solution[i, j+1] = CellState.WHITE
@@ -383,13 +390,15 @@ class HitoriSolver:
         if local_position == len(combinations):
             return []
         local_combinations = []
-        my_combinations = combinations[local_position]
-        next_combinations = self.aggregate_multi(combinations, local_position + 1)
+        next_combinations = self.aggregate_multi(combinations, local_position + 1, transposed=transposed)
 
         local_hitori = self.hitori
         if transposed:
             local_hitori = self.cols
 
+        my_combinations = combinations[local_position]
+        if not my_combinations:
+            return next_combinations
         if next_combinations:
             for next_combination in next_combinations:
                 for my_combination in my_combinations:
@@ -397,32 +406,46 @@ class HitoriSolver:
 
                     # check value sums vertically
                     # ========== CANT CHECK BECAUSE WE NEED TO CONSIDER UNKNOWNS ==========
-                    # for col in range(len(self.hitori[0])):
-                    #     values_to_check = []
-                    #     for row in my_combination.rows.keys():
-                    #         values_to_check.append(self.hitori[row][col])
-                    #     for row in next_combination.rows.keys():
-                    #         if self.hitori[row][col] in values_to_check:
-                    #             skip = True
-                    #             break
-                    #     if skip: break
-                    # if skip: continue
+                    for col in range(len(local_hitori[0])):
+                        values_to_check = []
+                        for row in my_combination.rows.keys():
+                            value = local_hitori[row][col]
+                            if value in my_combination.rows[row] and my_combination[row, value] == col:
+                                values_to_check.append(value)
+                        for row in next_combination.rows.keys():
+                            value = local_hitori[row][col]
+                            if value in next_combination.rows[row] and next_combination[row, value] == col and value in values_to_check:
+                                skip = True
+                                log.debug("skipping combination", value, row, col, my_combination, next_combination)
+                                break
+                        if skip: break
+                    if skip: continue
 
                     # check if any black cell is in the same column
                     row1 = my_combination.max_row
                     row2 = next_combination.min_row
-                    # if row1 + 1 != row2:
-                    #     raise Exception("Invalid combination rows " + str(row1) + " " + str(row2))
-                    for i in range(len(local_hitori[row1])):
-                        value = local_hitori[row1][i]
-                        value2 = local_hitori[row2][i]
-                        a = my_combination.rows[row1]
-                        # i for row is black
-                        if self.solution[row1, i] == CellState.BLACK or (value in my_combination.rows[row1] and my_combination[row1, value] != i):
-                            # i for row2 is black
-                            if self.solution[row2, i] == CellState.BLACK or (value2 in next_combination.rows[row2] and next_combination[row2, value2] != i):
-                                skip = True
-                                break
+                    if row1 + 1 == row2:
+                        # raise Exception("Invalid combination rows " + str(row1) + " " + str(row2))
+                        # skipping combination2 4 0 2 0 {0: {4: 4, 7: 7}}[0 - 0] {2: {3: 2, 6: 1, 7: 5}, 3: {4: 2, 6: 3}, 4: {6: 6}, 5: {3: 4, 5: 2}, 6: {1: 7}, 7: {4: 5, 5: 4}}[2 - 7]
+                        for i in range(len(local_hitori[row1])):
+                            value = local_hitori[row1][i]
+                            value2 = local_hitori[row2][i]
+                            if row1 in my_combination.rows:
+                                if not transposed:
+                                    # i for row is black
+                                    if self.solution[row1, i] == CellState.BLACK or (value in my_combination.rows[row1] and my_combination[row1, value] != i):
+                                        # i for row2 is black
+                                        if self.solution[row2, i] == CellState.BLACK or (value2 in next_combination.rows[row2] and next_combination[row2, value2] != i):
+                                            log.debug("skipping combination2", value, row1, row2, i, my_combination, next_combination)
+                                            skip = True
+                                            break
+                                else:
+                                    if self.solution[i, row1] == CellState.BLACK or (value in my_combination.rows[row1] and my_combination[row1, value] != i):
+                                        # i for row2 is black
+                                        if self.solution[i, row2] == CellState.BLACK or (value2 in next_combination.rows[row2] and next_combination[row2, value2] != i):
+                                            log.debug("skipping combination2", value, row1, row2, i, my_combination, next_combination)
+                                            skip = True
+                                            break
                     if skip:
                         continue
 
@@ -454,32 +477,48 @@ class HitoriSolver:
     def process_cells(self, transposed: bool = False) -> list[Combination]:
         log.info('\n================= Row Combinations =================')
 
-        # divide rows by three
-        # step = 4
-        # list_to_check = self.hitori
-        # temp = True
-        # while(len(list_to_check) > step):
+        step = 2  # if changed wont work
+        list_to_check = []
+        for i in range(0, len(self.hitori)):
+            sol = self.combinations_for_row(i, transposed=transposed)
+            sol = [Combination({i: s}) for s in sol]
+            log.info("\ncombinations for row {i}:\n".format(i=i), Combination.combinations_to_str(sol))
+            # TODO: if returned single solution, set it directly to self.solution?
+            list_to_check.append(sol)
+        list_to_check = self.aggregate_multi(list_to_check, transposed=transposed)
+        log.info("\n" + ("Transposed " if transposed else "") + "Combinations:\n", len(list_to_check))
+        log.debug("\n", Combination.combinations_to_str(list_to_check))
+        # count = 1
+        # while(len(list_to_check) >= step):
         #     multi = []
-        #     print('a')
         #     for i in range(0, len(list_to_check) - 1, step):
-        #         if temp:
-        #             sol = self.combinations_for_row(i, transposed=transposed)
-        #             sol = [Combination({i: s}) for s in sol]
-        #             sol2 = self.combinations_for_row(i + 1, transposed=transposed)
-        #             sol2 = [Combination({i+1: s}) for s in sol2]
-        #             multi.append(self.aggregate_multi([sol, sol2]))
-        #         else:
-        #             multi.append(self.aggregate_multi(list_to_check[i:i+step]))
-        #     temp = False
+        #         aggr = self.aggregate_multi(list_to_check[i:i+step], transposed=transposed)
+        #         for m in aggr:
+        #             m.min_row = i * count
+        #             m.max_row = (i + step - 1) * count
+        #         str_rows = f'{aggr[0].min_row}, {aggr[-1].max_row}' if len(aggr) > 0 else ''
+        #         log.info(f"\naggregate_multi ({str_rows}):\n", Combination.combinations_to_str(aggr))
+        #         multi.append(aggr)
+        #     if len(list_to_check) % step != 0:
+        #         last_sol = list_to_check[-1]
+        #         print("last_sol", last_sol)
+        #         print("multi", multi[-1])
+        #         multi[-1] = self.aggregate_multi([multi[-1], last_sol], transposed=transposed)
+        #         # TODO: update min_row and max_row
+
+        #     count += step
         #     list_to_check = multi
 
+        # print(list_to_check)
+        # print(list_to_check[0])
         # multi_multi = self.aggregate_multi(list_to_check, transposed=transposed)
         # if len(self.hitori) % 2 != 0:
         #     last_sol = self.combinations_for_row(len(self.hitori) - 1, transposed=transposed)
         #     last_sol = [Combination({len(self.hitori) - 1: s}) for s in last_sol]
-        #     mmm = self.aggregate_multi([multi_multi, last_sol])
+        #     mmm = self.aggregate_multi([multi_multi, last_sol], transposed=transposed)
         # else:
         #     mmm = list_to_check
+        return list_to_check
 
 
 
@@ -491,28 +530,41 @@ class HitoriSolver:
         solutions3 = self.combinations_for_row(2, transposed=transposed)
         solutions4 = self.combinations_for_row(3, transposed=transposed)
         solutions5 = self.combinations_for_row(4, transposed=transposed)
-        log.debug("\ncombinations for row 1:\n", solutions)
-        log.debug("\ncombinations for row 2:\n", solutions2)
-        log.debug("\ncombinations for row 3:\n", solutions3)
-        log.debug("\ncombinations for row 4:\n", solutions4)
-        log.debug("\ncombinations for row 5:\n", solutions5)
-
         solutions = [Combination({0: s}) for s in solutions]
         solutions2 = [Combination({1: s}) for s in solutions2]
-        multi = self.aggregate_multi([solutions, solutions2])
-  
         solutions3 = [Combination({2: s}) for s in solutions3]
         solutions4 = [Combination({3: s}) for s in solutions4]
-        multi2 = self.aggregate_multi([solutions3, solutions4])
-
-        multi_multi = self.aggregate_multi([multi, multi2])
-
         solutions5 = [Combination({4: s}) for s in solutions5]
-        mmm = self.aggregate_multi([multi_multi, solutions5])
+        log.debug("\ncombinations for row 1:\n", Combination.combinations_to_str(solutions))
+        log.debug("\ncombinations for row 2:\n", Combination.combinations_to_str(solutions2))
+        log.debug("\ncombinations for row 3:\n", Combination.combinations_to_str(solutions3))
+        log.debug("\ncombinations for row 4:\n", Combination.combinations_to_str(solutions4))
+        log.debug("\ncombinations for row 5:\n", Combination.combinations_to_str(solutions5))
+
+        multi = self.aggregate_multi([solutions, solutions2], transposed=transposed)
+        for m in multi:
+            m.min_row = 0
+            m.max_row = 1
+        log.debug("\nmulti:\n", Combination.combinations_to_str(multi))
+        
+        multi2 = self.aggregate_multi([solutions3, solutions4], transposed=transposed)
+        for m in multi2:
+            m.min_row = 2
+            m.max_row = 3
+        log.debug("\nmulti2:\n", Combination.combinations_to_str(multi2))
+
+        multi_multi = self.aggregate_multi([multi, multi2], transposed=transposed)
+        for m in multi_multi:
+            m.min_row = 0
+            m.max_row = 3
+        log.debug("\nmulti_multi:\n", Combination.combinations_to_str(multi_multi))
+
+        mmm = self.aggregate_multi([multi_multi, solutions5], transposed=transposed)
+        for m in mmm:
+            m.min_row = 0
+            m.max_row = 4
         log.info("\naggregate_multi:\n", Combination.combinations_to_str(mmm))
         return mmm
-
-
 
 
 
@@ -586,19 +638,8 @@ class HitoriSolver:
         log.info("Combination state", solution_copy.state)
         log.info(solution_copy)
 
-
-    def solve(self):
-        log.info('================= Solving Hitori =================')
-        log.info(self)
-
-        rows_count = [{i: row.count(i) for i in set(row)} for row in self.hitori]
-        cols_count = [{i: col.count(i) for i in set(col)} for col in [[row[i] for row in self.hitori] for i in range(len(self.cols))]]
-        self._pruning(rows_count, cols_count)
-        
-        row_combinations = self.process_cells()
-        col_combinations = self.process_cells(transposed=True)
-
-        for row_combination in row_combinations:
+    def find_solution(self, row_combinations: list[Combination], col_combinations: list[Combination]):
+        for row_idx, row_combination in enumerate(row_combinations):
             # create a copy of the solution
             copy_solution = HitoriSolution(self.hitori)
             for i in range(self.solution.rows):
@@ -606,7 +647,7 @@ class HitoriSolver:
                     if self.solution[i, j] == CellState.UNKNOWN:
                         # apply row_combination white and black cells
                         value = self.hitori[i][j]
-                        if value in row_combination.rows[i]:
+                        if i in row_combination.rows and value in row_combination.rows[i]:
                             if row_combination[i, value] == j:
                                 copy_solution[i, j] = CellState.WHITE
                             else:
@@ -615,9 +656,11 @@ class HitoriSolver:
                         copy_solution[i, j] = self.solution[i, j]
             # print("row_solution\n" + str(copy_solution))
             # checking if col_combination fits row_combination
-            for col_combination in col_combinations:
+            for col_idx, col_combination in enumerate(col_combinations):
                 skip = False
                 moves = []
+                if col_idx == 7 and row_idx == 2:
+                    log.debug()
                 for col, col_values in col_combination.rows.items():
                     for i in range(len(self.hitori)):
                         value = self.hitori[i][col]
@@ -627,24 +670,57 @@ class HitoriSolver:
                                 col_combination_value = CellState.WHITE
                             else:
                                 col_combination_value = CellState.BLACK
-                            if copy_solution[i, col] == CellState.UNKNOWN:
-                                copy_solution[i, col] = col_combination_value
-                                moves.append((i, col, col_combination_value))
-                            elif copy_solution[i, col] != col_combination_value:
-                                    skip = True
-                                    break
+                            new_move = None
+                            if copy_solution[i, col] == CellState.UNKNOWN or copy_solution[i, col] == CellState.WHITE:
+                                new_move = (i, col, col_combination_value)
+                            elif copy_solution[i, col] != col_combination_value and col_combination_value == CellState.BLACK:
+                                new_move = (i, col, col_combination_value)
+                            if new_move:
+                                if new_move[2] == CellState.BLACK:
+                                    # check if the black cell is valid
+                                    if (i < len(self.hitori) - 1 and copy_solution[i+1, col] == CellState.BLACK or
+                                        i > 0 and copy_solution[i-1, col] == CellState.BLACK or
+                                        col < len(self.hitori[0]) - 1 and copy_solution[i, col+1] == CellState.BLACK or
+                                        col > 0 and copy_solution[i, col-1] == CellState.BLACK):
+                                        skip = True
+                                        break
+                                moves.append(new_move)
+                                # TODO: save the moves each time and then restore?
+                            
                     if skip: break
                 if skip: continue
+                previous_states = []
                 for move in moves:
+                    previous_states.append((move[0], move[1], copy_solution[move[0], move[1]]))
                     copy_solution[move[0], move[1]] = move[2]
                 if not skip:
-                    print("copy_solution\n" + str(copy_solution))
-                    print("state", copy_solution.state)
-                    input()
+                    # print(f"combined solution ({row_idx}, {col_idx})\n" + str(copy_solution))
+                    # print("state", copy_solution.state)
+                    solution_state = copy_solution.state
+                    if solution_state == HitoriState.SOLVED:
+                        log.warning('================= Solution found =================')
+                        log.warning(copy_solution)
+                        return
+                for state in previous_states:
+                    copy_solution[state[0], state[1]] = state[2]
+        log.warning('\n\n================= No Solution Found =================\n')
 
-        log.info('\n\n================= Solution =================')
-        self.validate_combination(row_combinations[12])  # 2, 5, 11, 12
-        self.validate_combination(col_combinations[5], transposed=True)  # 5, 13
+    def solve(self):
+        log.warning('================= Solving Hitori =================')
+        log.warning(self)
+
+        rows_count = [{i: row.count(i) for i in set(row)} for row in self.hitori]
+        cols_count = [{i: col.count(i) for i in set(col)} for col in [[row[i] for row in self.hitori] for i in range(len(self.cols))]]
+        self._pruning(rows_count, cols_count)
+        # return
+        
+        row_combinations = self.process_cells()
+        col_combinations = self.process_cells(transposed=True)
+
+        self.find_solution(row_combinations, col_combinations)
+
+        # self.validate_combination(row_combinations[2])
+        # self.validate_combination(col_combinations[7], transposed=True)
 
 
 ex1 = [
@@ -654,7 +730,6 @@ ex1 = [
 ]
 ex2 = [
     [1, 1, 2, 5, 4],
-    # [1, 1, 2, 2, 4],
     [2, 3, 3, 1, 2],
     [1, 3, 4, 3, 5],
     [3, 4, 1, 2, 3],
@@ -697,8 +772,21 @@ ex2 soluion:
     X O O O X
     O O O X O
     O X O O O
-
-{0: {1: 1, 4: 4}, 1: {2: 2}, 2: {3: 4}, 3: {2: 3}, 4: {4: 1}} row aggregation not present
 """
-HitoriSolver(ex4).solve()
 
+def read_hitori_example(file_name):
+    current_dir = os.path.dirname(__file__)
+    file_path = os.path.join(current_dir, 'hitori_examples', file_name)
+    with open(file_path, 'r') as file:
+        lines = file.readlines()
+        example = []
+        for line in lines:
+            row = list(map(int, line.strip().split()))
+            example.append(row)
+    return example
+
+# Read the example from the file
+example_file_name = 'ex1.txt'  # Replace with your file name
+ex = read_hitori_example(example_file_name)
+
+HitoriSolver(ex3).solve()
