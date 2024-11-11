@@ -5,30 +5,30 @@
 #include <stdbool.h>
 
 #define MAX_BUFFER_SIZE 2048
-#define DEBUG true
+#define DEBUG false
 
-enum State {
+typedef enum CellState {
     UNKNOWN = -1,
     WHITE = 0,
     BLACK = 1
-};
+} CellState;
 
-enum Type {
+typedef enum BoardType {
     BOARD = 0,
     SOLUTION = 1
-};
+} BoardType;
 
-enum ScatterType {
+typedef enum ScatterType {
     ROWS = 0,
     COLS = 1
-};
+} ScatterType;
 
-enum CornerType {
+typedef enum CornerType {
     TOP_LEFT = 0,
     TOP_RIGHT = 1,
     BOTTOM_LEFT = 2,
     BOTTOM_RIGHT = 3
-};  
+} CornerType;  
 
 typedef struct Board {
     int *grid;
@@ -45,7 +45,7 @@ void read_board(int **board, int *rows_count, int *cols_count, int **solution) {
         Helper function to read the board from the input file.
     */
     
-    FILE *fp = fopen("../test-cases/inputs/input-8x8.txt", "r");
+    FILE *fp = fopen("../test-cases/inputs/input-20x20.txt", "r");
     
     if (fp == NULL) {
         printf("Could not open file.\n");
@@ -91,7 +91,7 @@ void read_board(int **board, int *rows_count, int *cols_count, int **solution) {
     fclose(fp);
 } 
 
-void write_solution(struct Board board) {
+void write_solution(Board board) {
 
     /*
         Helper function to write the solution to the output file.
@@ -128,7 +128,7 @@ void print_vector(int *vector, int size) {
     printf("\n");
 }
 
-void print_board(char *title, struct Board board, enum Type type) {
+void print_board(char *title, Board board, BoardType type) {
 
     /*
         Helper function to print the board.
@@ -168,7 +168,7 @@ void free_memory(int *pointers[]) {
 
 /* ------------------ BOARD HELPERS ------------------ */
 
-void pack_board(struct Board board, int **buffer, int *buffer_size) {
+void pack_board(Board board, int **buffer, int *buffer_size) {
 
     /*
         Helper function to pack the board into a buffer.
@@ -192,7 +192,7 @@ void pack_board(struct Board board, int **buffer, int *buffer_size) {
     *buffer_size = size;
 }
 
-void unpack_board(int *buffer, int buffer_size, struct Board *board) {
+void unpack_board(int *buffer, int buffer_size, Board *board) {
     
     /*
         Helper function to unpack the board from a buffer.
@@ -210,13 +210,13 @@ void unpack_board(int *buffer, int buffer_size, struct Board *board) {
     MPI_Unpack(buffer, buffer_size, &position, board->solution, board->rows_count * board->cols_count, MPI_INT, MPI_COMM_WORLD);
 }
 
-struct Board transpose(struct Board board) {
+Board transpose(Board board) {
 
     /*
         Helper function to transpose a matrix.
     */
 
-    struct Board Tboard = board;
+    Board Tboard = board;
     Tboard.grid = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
     Tboard.solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
 
@@ -231,7 +231,7 @@ struct Board transpose(struct Board board) {
     return Tboard;
 }
 
-bool is_board_equal(struct Board first_board, struct Board second_board, enum Type type) {
+bool is_board_equal(Board first_board, Board second_board, BoardType type) {
 
     /*
         Helper function to check if two boards are equal.
@@ -248,13 +248,13 @@ bool is_board_equal(struct Board first_board, struct Board second_board, enum Ty
     return true;
 }
 
-struct Board combine_board_solutions(struct Board first_board, struct Board second_board, bool forced) {
+Board combine_board_solutions(Board first_board, Board second_board, bool forced) {
 
     /*
         Combine the solutions of two boards to get the final solution.
     */
 
-    struct Board final;
+    Board final;
     final.grid = first_board.grid;
     final.rows_count = first_board.rows_count;
     final.cols_count = first_board.cols_count;
@@ -284,16 +284,16 @@ struct Board combine_board_solutions(struct Board first_board, struct Board seco
     return final;
 }
 
-struct Board combine_partial_solutions(struct Board board, int *row_solution, int *col_solution, char *technique, bool forced, bool transpose_cols) {
+Board combine_partial_solutions(Board board, int *row_solution, int *col_solution, char *technique, bool forced, bool transpose_cols) {
 
     /*
         Combine the partial solutions from the rows and columns to get the final solution.
     */
 
-    struct Board row_board = board;
+    Board row_board = board;
     row_board.solution = row_solution;
 
-    struct Board col_board = board;
+    Board col_board = board;
     col_board.solution = col_solution;
 
     if (transpose_cols)
@@ -310,7 +310,7 @@ struct Board combine_partial_solutions(struct Board board, int *row_solution, in
 
 /* ------------------ MPI UTILS ------------------ */
 
-void mpi_share_board(struct Board board, int rank, struct Board *local_board) {
+void mpi_share_board(Board board, int rank, Board *local_board) {
 
     /*
         Share the board with all the processes.
@@ -331,7 +331,7 @@ void mpi_share_board(struct Board board, int rank, struct Board *local_board) {
     free(buffer);
 }
 
-void mpi_scatter_board(struct Board board, int size, int rank, enum ScatterType scatter_type, enum Type target_type, int **local_vector, int **counts_send, int **displs_send) {
+void mpi_scatter_board(Board board, int size, int rank, ScatterType scatter_type, BoardType target_type, int **local_vector, int **counts_send, int **displs_send) {
 
     /*
         Initialize the counts_send and displs_send arrays:
@@ -398,7 +398,7 @@ void mpi_scatter_board(struct Board board, int size, int rank, enum ScatterType 
         MPI_Scatterv(board.solution, *counts_send, *displs_send, MPI_INT, *local_vector, (*counts_send)[rank], MPI_INT, 0, MPI_COMM_WORLD);
 }
 
-void mpi_gather_board(struct Board board, int rank, int *local_vector, int *counts_send, int *displs_send, int **solution) {
+void mpi_gather_board(Board board, int rank, int *local_vector, int *counts_send, int *displs_send, int **solution) {
 
     /*
         Gather the local vectors from each process and combine them to get the final solution.
@@ -409,13 +409,13 @@ void mpi_gather_board(struct Board board, int rank, int *local_vector, int *coun
     MPI_Gatherv(local_vector, counts_send[rank], MPI_INT, *solution, counts_send, displs_send, MPI_INT, 0, MPI_COMM_WORLD);
 }
 
-struct Board mpi_compute_and_share(struct Board board, int rank, int *row_solution, int *col_solution, bool forced, char *technique, bool transpose_cols) {
+Board mpi_compute_and_share(Board board, int rank, int *row_solution, int *col_solution, bool forced, char *technique, bool transpose_cols) {
     
     /*
         Initialize the solution board with the values of the original board.
     */
 
-    struct Board solution;
+    Board solution;
     solution.grid = board.grid;
     solution.rows_count = board.rows_count;
     solution.cols_count = board.cols_count;
@@ -440,9 +440,9 @@ struct Board mpi_compute_and_share(struct Board board, int rank, int *row_soluti
     return solution;
 }
 
-/* ------------------ HITORI TECNIQUES ------------------ */
+/* ------------------ HITORI PRUNING TECNIQUES ------------------ */
 
-struct Board mpi_uniqueness_rule(struct Board board, int size, int rank) {
+Board mpi_uniqueness_rule(Board board, int size, int rank) {
 
     /*
         RULE DESCRIPTION:
@@ -513,14 +513,14 @@ struct Board mpi_uniqueness_rule(struct Board board, int size, int rank) {
     mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
     mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
 
-    struct Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, true, "Uniqueness Rule", true);
+    Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, true, "Uniqueness Rule", true);
 
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
     return solution;
 }
 
-struct Board mpi_set_white(struct Board board, int size, int rank) {
+Board mpi_set_white(Board board, int size, int rank) {
     
     /*
         RULE DESCRIPTION:
@@ -568,7 +568,7 @@ struct Board mpi_set_white(struct Board board, int size, int rank) {
         }
     }
 
-    struct Board TBoard = transpose(board);
+    Board TBoard = transpose(board);
 
     // For each local column, check if triplet values are present
     int cols_count = (counts_send_col[rank] / board.rows_count);
@@ -594,14 +594,14 @@ struct Board mpi_set_white(struct Board board, int size, int rank) {
     mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
     mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
 
-    struct Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, false, "Set White", true);
+    Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, false, "Set White", true);
     
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
     return solution;
 }
 
-struct Board mpi_set_black(struct Board board, int size, int rank) {
+Board mpi_set_black(Board board, int size, int rank) {
     
     /*
         RULE DESCRIPTION:
@@ -648,14 +648,14 @@ struct Board mpi_set_black(struct Board board, int size, int rank) {
     mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
     mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
 
-    struct Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, false, "Set Black", true);
+    Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, false, "Set Black", true);
     
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
     return solution;
 }
 
-struct Board mpi_sandwich_rules(struct Board board, int size, int rank) {
+Board mpi_sandwich_rules(Board board, int size, int rank) {
 
     /*
         RULE DESCRIPTION:
@@ -739,14 +739,14 @@ struct Board mpi_sandwich_rules(struct Board board, int size, int rank) {
     mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
     mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
 
-    struct Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, false, "Sandwich Rules", true);
+    Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, false, "Sandwich Rules", true);
     
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
     return solution;
 }
 
-struct Board mpi_pair_isolation(struct Board board, int size, int rank) {
+Board mpi_pair_isolation(Board board, int size, int rank) {
 
     /*
         RULE DESCRIPTION:
@@ -839,14 +839,14 @@ struct Board mpi_pair_isolation(struct Board board, int size, int rank) {
     mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
     mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
 
-    struct Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, false, "Pair Isolation", true);
+    Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, false, "Pair Isolation", true);
     
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
     return solution;
 }
 
-void compute_corner(struct Board board, int x, int y, enum CornerType corner_type, int **local_corner_solution) {
+void compute_corner(Board board, int x, int y, CornerType corner_type, int **local_corner_solution) {
     
     /*
         Set the local board to work with the corner
@@ -968,7 +968,7 @@ void compute_corner(struct Board board, int x, int y, enum CornerType corner_typ
     }
 }
 
-struct Board mpi_corner_cases(struct Board board, int size, int rank) {
+Board mpi_corner_cases(Board board, int size, int rank) {
     
     /*
         RULE DESCRIPTION:
@@ -1086,10 +1086,10 @@ struct Board mpi_corner_cases(struct Board board, int size, int rank) {
             int *bottom_left_solution = solutions + 2 * board.rows_count * board.cols_count;
             int *bottom_right_solution = solutions + 3 * board.rows_count * board.cols_count;
 
-            struct Board top_corners_board = combine_partial_solutions(board, top_left_solution, top_right_solution, "Top Corner Cases", false, false);
+            Board top_corners_board = combine_partial_solutions(board, top_left_solution, top_right_solution, "Top Corner Cases", false, false);
             top_corners_solution = top_corners_board.solution;
 
-            struct Board bottom_corners_board = combine_partial_solutions(board, bottom_left_solution, bottom_right_solution, "Bottom Corner Cases", false, false);
+            Board bottom_corners_board = combine_partial_solutions(board, bottom_left_solution, bottom_right_solution, "Bottom Corner Cases", false, false);
             bottom_corners_solution = bottom_corners_board.solution;
 
             free_memory((int *[]){solutions, top_left_solution, top_right_solution, bottom_left_solution, bottom_right_solution});
@@ -1108,7 +1108,7 @@ struct Board mpi_corner_cases(struct Board board, int size, int rank) {
     return mpi_compute_and_share(board, rank, top_corners_solution, bottom_corners_solution, false, "Corner Cases", false);
 }
 
-struct Board mpi_flanked_isolation(struct Board board, int size, int rank) {
+Board mpi_flanked_isolation(Board board, int size, int rank) {
 
     /*
         RULE DESCRIPTION:
@@ -1185,14 +1185,16 @@ struct Board mpi_flanked_isolation(struct Board board, int size, int rank) {
     mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
     mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
 
-    struct Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, false, "Flanked Isolation", true);
+    Board solution = mpi_compute_and_share(board, rank, row_solution, col_solution, false, "Flanked Isolation", true);
 
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
     return solution;
 }
 
-bool single_is_cell_state_valid(struct Board board, int x, int y, enum State cell_state) {
+/* ------------------ HITORI BACKTRACKING ------------------ */
+
+bool single_is_cell_state_valid(Board board, int x, int y, CellState cell_state) {
     if (cell_state == BLACK) {
         if (x > 0 && board.solution[(x - 1) * board.cols_count + y] == BLACK) return false;
         if (x < board.rows_count - 1 && board.solution[(x + 1) * board.cols_count + y] == BLACK) return false;
@@ -1210,26 +1212,27 @@ bool single_is_cell_state_valid(struct Board board, int x, int y, enum State cel
     return true;
 }
 
-struct Board single_set_white_and_black_cells(struct Board board, int x, int y, enum State cell_state, int **edited_cells, int *edited_count) {
+Board single_set_white_and_black_cells(int rank, Board board, int x, int y, CellState cell_state, int **edited_cells, int *edited_count) {
     
-    if (*edited_cells != NULL) {
+    if (edited_cells != NULL) {
         *edited_cells = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
         *edited_count = 0;
     }
     
     int i;
     if (cell_state == BLACK) {
-        int points[] = {
-            (x - 1) * board.cols_count + y,
-            (x + 1) * board.cols_count + y,
-            x * board.cols_count + y - 1,
-            x * board.cols_count + y + 1
-        };
-        
-        for (i = 0; i < 4; i++) {
-            if (points[i] >= 0 && points[i] < board.rows_count * board.cols_count && board.solution[points[i]] == UNKNOWN) {
+        int points[4];
+        int count = 0;
+
+        if (x > 0) points[count++] = (x - 1) * board.cols_count + y;
+        if (x < board.rows_count - 1) points[count++] = (x + 1) * board.cols_count + y;
+        if (y > 0) points[count++] = x * board.cols_count + y - 1;
+        if (y < board.cols_count - 1) points[count++] = x * board.cols_count + y + 1;
+
+        for (i = 0; i < count; i++) {
+            if (board.solution[points[i]] == UNKNOWN) {
                 board.solution[points[i]] = WHITE;
-                if (*edited_cells != NULL) {
+                if (edited_cells != NULL) {
                     (*edited_cells)[*edited_count] = points[i];
                     (*edited_count)++;
                 }
@@ -1238,17 +1241,17 @@ struct Board single_set_white_and_black_cells(struct Board board, int x, int y, 
     } else if (cell_state == WHITE) {
         int i, j, cell_value = board.grid[x * board.cols_count + y];
         for (i = 0; i < board.rows_count; i++)
-            if (i != x && board.grid[i * board.cols_count + y] == cell_value) {
-                board.grid[i * board.cols_count + y] = BLACK;
-                if (*edited_cells != NULL) {
+            if (i != x && board.grid[i * board.cols_count + y] == cell_value && board.solution[i * board.cols_count + y] == UNKNOWN) {
+                board.solution[i * board.cols_count + y] = BLACK;
+                if (edited_cells != NULL) {
                     (*edited_cells)[*edited_count] = i * board.cols_count + y;
                     (*edited_count)++;
                 }
             }
         for (j = 0; j < board.cols_count; j++)
-            if (j != y && board.grid[x * board.cols_count + j] == cell_value) {
-                board.solution[x * board.cols_count + j] == BLACK;
-                if (*edited_cells != NULL) {
+            if (j != y && board.grid[x * board.cols_count + j] == cell_value && board.solution[x * board.cols_count + j] == UNKNOWN) {
+                board.solution[x * board.cols_count + j] = BLACK;
+                if (edited_cells != NULL) {
                     (*edited_cells)[*edited_count] = x * board.cols_count + j;
                     (*edited_count)++;
                 }
@@ -1257,59 +1260,167 @@ struct Board single_set_white_and_black_cells(struct Board board, int x, int y, 
     return board;
 }
 
-struct Board single_restore_white_and_black_cells(struct Board board, int *edited_cells, int edited_count) {
+Board single_restore_white_and_black_cells(Board board, int *edited_cells, int edited_count) {
     int i;
     for (i = 0; i < edited_count; i++)
         board.solution[edited_cells[i]] = UNKNOWN;
     return board;
 }
 
-bool single_recursive_set_cell(struct Board board, int* unknown_index, int* unknown_index_length, int uk_x, int uk_y) {
-    int i, j, board_y_index;
-    bool found = false;
-    // Get next unknown starting from previous unknown in uk_x, uk_y
-    for (i = uk_x; i < board.rows_count; i++) {
-        for (j = uk_y; j < unknown_index_length[i]; j++) {
-            int board_y_index = unknown_index[i * board.cols_count + j];
-            if (board.solution[i * board.cols_count + board_y_index] == UNKNOWN) {
-                uk_x = i;
-                uk_y = j;
-                found = true;
+int dfs_white_cells(Board board, bool * visited, int row, int col) {
+    if (row < 0 || row >= board.rows_count || col < 0 || col >= board.cols_count) return 0;
+    if (visited[row * board.cols_count + col]) return 0;
+    if (board.solution[row * board.cols_count + col] == BLACK) return 0;
+
+    visited[row * board.cols_count + col] = true;
+
+    int count = 1;
+    count += dfs_white_cells(board, visited, row - 1, col);
+    count += dfs_white_cells(board, visited, row + 1, col);
+    count += dfs_white_cells(board, visited, row, col - 1);
+    count += dfs_white_cells(board, visited, row, col + 1);
+    return count;
+}
+
+bool all_white_cells_connected(Board board) {
+
+    bool *visited = malloc((board.rows_count * board.cols_count) * sizeof(bool));
+    int i, j;
+
+    for (i = 0; i < board.rows_count; i++) {
+        for (j = 0; j < board.cols_count; j++) {
+            visited[i * board.cols_count + j] = false;
+        }
+    }
+
+    // Find the first white cell
+    int row = -1, col = -1;
+
+    for (i = 0; i < board.rows_count; i++) {
+        for (j = 0; j < board.cols_count; j++) {
+            if (board.solution[i * board.cols_count + j] == WHITE) {
+                row = i;
+                col = j;
                 break;
             }
         }
-        if (found)
-            break;
+        if (row != -1) break;
     }
-    if (!found) {
+
+    int white_cells_count = 0;
+    for (i = 0; i < board.rows_count; i++) {
+        for (j = 0; j < board.cols_count; j++) {
+            if (board.solution[i * board.cols_count + j] == WHITE) white_cells_count++;
+        }
+    }
+
+    // Rule 3: When completed, all un-shaded (white) squares create a single continuous area
+    return dfs_white_cells(board, visited, row, col) == white_cells_count;
+}
+
+bool has_unique_values(Board board) {
+    
+    // Rule 1: No unshaded number appears in a row or column more than once
+    int i, j, k;
+    for (i = 0; i < board.rows_count; i++) {
+        for (j = 0; j < board.cols_count; j++) {
+
+            if (board.solution[i * board.cols_count + j] == UNKNOWN) return false;
+
+            if (board.solution[i * board.cols_count + j] == WHITE) {
+                for (k = 0; k < board.rows_count; k++) {
+                    if (k != i && board.solution[k * board.cols_count + j] == WHITE && board.grid[i * board.cols_count + j] == board.grid[k * board.cols_count + j]) return false;
+                }
+
+                for (k = 0; k < board.cols_count; k++) {
+                    if (k != j && board.solution[i * board.cols_count + k] == WHITE && board.grid[i * board.cols_count + j] == board.grid[i * board.cols_count + k]) return false;
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+bool single_recursive_set_cell(int rank, Board board, int* unknown_index, int* unknown_index_length, int uk_x, int uk_y) {
+    int i, j, board_y_index;
+    //printf("trying %d %d\n", uk_x, uk_y);
+    //print_vector(unknown_index, board.rows_count * board.cols_count);
+    //print_board("Recursive", board, SOLUTION);
+    //printf("Il valore della cella è %d\n", board.solution[uk_x * board.cols_count + unknown_index[uk_x * board.cols_count + uk_y]]);
+    // Get next unknown starting from previous unknown in uk_x, uk_y
+    
+    while (uk_x < board.rows_count && uk_y >= unknown_index_length[uk_x]) {
+        uk_x++;
+        uk_y = 0;
+    }
+
+
+    if (uk_x == board.rows_count) {
         // TODO: validate current solution and return bool
+        //printf("Solution found\n");
+
+        //print_board("Solution", board, SOLUTION);
+
+        bool result = has_unique_values(board) && all_white_cells_connected(board);
+
+        if (result) {
+            printf("Solved by process %d\n", rank);
+            print_board("Solution", board, SOLUTION);
+        }
+
+        return result;
     }
+
+    board_y_index = unknown_index[uk_x * board.cols_count + uk_y];
+    //printf("UK trovato: Provo la cella %d %d\n", uk_x, uk_y);
 
     // First check if setting this cell to white works, then try black
-
-    int *edited_cells, edited_count;
-    if (single_is_cell_state_valid(board, uk_x, board_y_index, WHITE)) {
-        board.solution[uk_x * board.cols_count + board_y_index] = WHITE;
-        single_set_white_and_black_cells(board, uk_x, board_y_index, WHITE, &edited_cells, &edited_count);
-
-        // TODO: check if board is passed by reference and the recursive function sees the updated solution
-        if (single_recursive_set_cell(board, unknown_index, unknown_index_length, uk_x, uk_y))
-            return true;
+    int cell_value = board.solution[uk_x * board.cols_count + board_y_index];
+    if (cell_value == UNKNOWN) {
+        //printf("Provo il bianco %d %d\n", uk_x, uk_y);
+        int *edited_cells, edited_count;
+        if (single_is_cell_state_valid(board, uk_x, board_y_index, WHITE)) {
+            board.solution[uk_x * board.cols_count + board_y_index] = WHITE;
+            single_set_white_and_black_cells(rank, board, uk_x, board_y_index, WHITE, &edited_cells, &edited_count);
+            
+            // TODO: check if board is passed by reference and the recursive function sees the updated solution
+            if (single_recursive_set_cell(rank, board, unknown_index, unknown_index_length, uk_x, uk_y + 1))
+                return true;
+            
+            board = single_restore_white_and_black_cells(board, edited_cells, edited_count);
+        } //else printf("Non posso mettere il bianco %d %d\n", uk_x, uk_y);
         
-        board = single_restore_white_and_black_cells(board, edited_cells, edited_count);
-    }
-    
-    if (single_is_cell_state_valid(board, uk_x, board_y_index, BLACK)) {
-        board.solution[uk_x * board.cols_count + board_y_index] = BLACK;
-        single_set_white_and_black_cells(board, uk_x, board_y_index, WHITE, &edited_cells, &edited_count);
-        // TODO: check if board is passed by reference and the recursive function sees the updated solution
-        if (single_recursive_set_cell(board, unknown_index, unknown_index_length, uk_x, uk_y))
-            return true;
+        //printf("Provo il nero %d %d\n", uk_x, uk_y);
+        if (single_is_cell_state_valid(board, uk_x, board_y_index, BLACK)) {
+            board.solution[uk_x * board.cols_count + board_y_index] = BLACK;
+            single_set_white_and_black_cells(rank, board, uk_x, board_y_index, BLACK, &edited_cells, &edited_count);
+            // TODO: check if board is passed by reference and the recursive function sees the updated solution
+            if (single_recursive_set_cell(rank, board, unknown_index, unknown_index_length, uk_x, uk_y + 1))
+                return true;
 
-        board = single_restore_white_and_black_cells(board, edited_cells, edited_count);
-    }
+            board = single_restore_white_and_black_cells(board, edited_cells, edited_count);
+        } //else printf("Non posso mettere il nero %d %d\n", uk_x, uk_y);
     
-    board.solution[uk_x * board.cols_count + board_y_index] = UNKNOWN;
+        board.solution[uk_x * board.cols_count + board_y_index] = UNKNOWN;
+
+    } else if (single_is_cell_state_valid(board, uk_x, board_y_index, cell_value)) {
+        //printf("Not unknown %d %d\n", uk_x, uk_y);
+        bool solution_found = single_recursive_set_cell(rank, board, unknown_index, unknown_index_length, uk_x, uk_y + 1);
+
+        //printf("Forced solution %d %d %d %d\n", uk_x, uk_y, cell_value, solution_found);
+
+        if (solution_found) return true;
+
+        cell_value = abs(cell_value - 1);
+        if (single_is_cell_state_valid(board, uk_x, board_y_index, cell_value)) {
+            board.solution[uk_x * board.cols_count + board_y_index] = cell_value;
+            solution_found = single_recursive_set_cell(rank, board, unknown_index, unknown_index_length, uk_x, uk_y + 1);
+
+            //printf("Forced solution [2] %d %d %d %d\n", uk_x, uk_y, cell_value, solution_found);
+        }
+    }
+
     return false;
 }
 
@@ -1323,7 +1434,7 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    struct Board board;
+    Board board;
 
     if (rank == 0) {
         read_board(&board.grid, &board.rows_count, &board.cols_count, &board.solution);
@@ -1343,7 +1454,7 @@ int main(int argc, char** argv) {
         Apply the basic hitori techniques to the board.
     */
 
-    struct Board (*techniques[])(struct Board, int, int) = {
+    Board (*techniques[])(Board, int, int) = {
         mpi_uniqueness_rule,
         mpi_sandwich_rules,
         mpi_pair_isolation,
@@ -1354,7 +1465,7 @@ int main(int argc, char** argv) {
     int num_techniques = sizeof(techniques) / sizeof(techniques[0]);
 
     int i;
-    struct Board pruned_solution = techniques[0](board, size, rank);
+    Board pruned_solution = techniques[0](board, size, rank);
     for (i = 1; i < num_techniques; i++) {
         pruned_solution = combine_board_solutions(pruned_solution, techniques[i](pruned_solution, size, rank), false);
         if (DEBUG && rank == 0) print_board("Partial", pruned_solution, SOLUTION);
@@ -1364,14 +1475,23 @@ int main(int argc, char** argv) {
         Repeat the whiting and blacking techniques until the solution doesn't change
     */
 
+    /*
+        Master - Slave approach
+        1) Each process can communicate with the master using ISend and IRecv
+        2) Initially, a single request is instantiated for each process
+        3) Children, each X time, calls MPI_Test to check if the master has sent a message 
+        4) Children, when a solution is valid and found, send a message to the master
+        5) Master, each X time, calls MPI_Test 
+    */
+
     bool changed = true;
     while (changed) {
 
-        struct Board white_solution = mpi_set_white(pruned_solution, size, rank);
-        struct Board black_solution = mpi_set_black(pruned_solution, size, rank);
+        Board white_solution = mpi_set_white(pruned_solution, size, rank);
+        Board black_solution = mpi_set_black(pruned_solution, size, rank);
 
-        struct Board partial = combine_board_solutions(pruned_solution, white_solution, false);
-        struct Board new_solution = combine_board_solutions(partial, black_solution, false);
+        Board partial = combine_board_solutions(pruned_solution, white_solution, false);
+        Board new_solution = combine_board_solutions(partial, black_solution, false);
 
         if (DEBUG && rank == 0) print_board("Partial", new_solution, SOLUTION);
 
@@ -1382,16 +1502,20 @@ int main(int argc, char** argv) {
         if (changed) pruned_solution = new_solution;
     }
 
+    if (rank == 0) print_board("Pruned", pruned_solution, SOLUTION);
+
     // Bruteforce the final solution (backtrack)
+    MPI_Barrier(MPI_COMM_WORLD);
 
-
-    if (false){
+    double start_time = MPI_Wtime();
+    if (true) {
         int j, temp_index = 0;
         int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
         int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
         if (rank == 0) {
             // Initialize the unknown index matrix with the indexes of the unknown cells to better scan them
             for (i = 0; i < board.rows_count; i++) {
+                temp_index = 0;
                 for (j = 0; j < board.cols_count; j++) {
                     int cell_index = i * board.cols_count + j;
                     if (pruned_solution.solution[cell_index] == UNKNOWN){
@@ -1403,9 +1527,13 @@ int main(int argc, char** argv) {
                 if (temp_index < board.cols_count)
                     unknown_index[i * board.cols_count + temp_index] = -1;
             }
+
+            //print_vector(unknown_index, board.rows_count * board.cols_count);
+            //print_vector(unknown_index_length, board.rows_count);
         }
 
         MPI_Bcast(unknown_index, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(unknown_index_length, board.rows_count, MPI_INT, 0, MPI_COMM_WORLD);
 
         // Create initial starting solution depending on the rank of the process
         // In this way, we define a sort of solution space for each process to analyse
@@ -1417,40 +1545,63 @@ int main(int argc, char** argv) {
                 uk_idx = unknown_index[i * board.rows_count + j];
                 cell_choice = temp_rank % 2;
 
+                //if (rank == 0) printf("[Cell choice] Rank %d: i=%d, j=%d, uk_idx=%d, cell_choice=%d\n", rank, i, j, uk_idx, cell_choice);
+
                 // Validate if cell_choice (black or white) here is valid
                 //      If not valid, use fixed choice and do not decrease temp_rank
                 //      If neither are valid, set to white (then the loop will change it)
                 if (!single_is_cell_state_valid(pruned_solution, i, uk_idx, cell_choice)) {
                     cell_choice = abs(cell_choice - 1);
-                    if (!single_is_cell_state_valid(pruned_solution, i, uk_idx, cell_choice))
-                        cell_choice = WHITE;
+                    if (!single_is_cell_state_valid(pruned_solution, i, uk_idx, cell_choice)) {
+                        cell_choice = UNKNOWN;
+                        continue;
+                    }
                 }
+
+                //if (rank == 1) printf("[Updated] Rank %d: i=%d, j=%d, uk_idx=%d, cell_choice=%d\n", rank, i, j, uk_idx, cell_choice);
+
                 pruned_solution.solution[i * board.cols_count + uk_idx] = cell_choice;
-                pruned_solution = single_set_white_and_black_cells(pruned_solution, i, uk_idx, cell_choice, NULL, NULL);
-                unknown_index[i * board.cols_count + j] = -2;  // ??
+                pruned_solution = single_set_white_and_black_cells(rank, pruned_solution, i, uk_idx, cell_choice, NULL, NULL);
+                //unknown_index[i * board.cols_count + j] = -2;  // ??
                 // set white and black cells (localised single process, no need to check all the matrix)
                 //      remember to update unknown_index (maybe add -2 as a value to ignore)
 
+                //if (rank == 1) print_board("[After coloring]", pruned_solution, SOLUTION);
+
                 if (temp_rank > 0)
                     temp_rank = temp_rank / 2;
+                
+                if (temp_rank == 0)
+                    break;
             }
+
+            if (temp_rank == 0)
+                break;
         }
 
-
+        //print_board("Pruned sad", pruned_solution, SOLUTION);
         // Loop
         // recursive function iterating unknown_index
-        bool solution_found = single_recursive_set_cell(pruned_solution, unknown_index, unknown_index_length, 0, 0);
+        bool solution; 
+        solution = single_recursive_set_cell(rank, pruned_solution, unknown_index, unknown_index_length, 0, 0);
         // if pruned_solution is really passed by reference, the solution should be inside it.
-    }
 
+    }
+    if (rank == 0) printf("Time: %f\n", MPI_Wtime() - start_time);
+
+    //if (rank == 0) print_board("Final 0", pruned_solution, SOLUTION);
 
     if (rank == 0) {
         write_solution(pruned_solution);
 
-        if (DEBUG) print_board("Final", pruned_solution, SOLUTION);
+        //if (DEBUG) print_board("Final", pruned_solution, SOLUTION);
     }
 
     free_memory((int *[]){board.grid, board.solution, pruned_solution.grid, pruned_solution.solution});
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    if (rank == 0) printf("Time2: %f\n", MPI_Wtime() - start_time);
 
     MPI_Finalize();
 
