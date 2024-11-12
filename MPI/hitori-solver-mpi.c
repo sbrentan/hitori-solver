@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 #define MAX_BUFFER_SIZE 2048
-#define DEBUG true
+#define DEBUG false
 
 typedef enum CellState {
     UNKNOWN = -1,
@@ -1338,9 +1338,11 @@ bool all_white_cells_connected(Board board) {
     return dfs_white_cells(board, visited, row, col) == white_cells_count;
 }
 
-bool has_unique_values(Board board) {
+bool check_hitori_conditions(Board board) {
     
     // Rule 1: No unshaded number appears in a row or column more than once
+    // Rule 2: Shaded cells cannot be adjacent, although they can touch at a corner
+
     int i, j, k;
     for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
@@ -1356,8 +1358,17 @@ bool has_unique_values(Board board) {
                     if (k != j && board.solution[i * board.cols_count + k] == WHITE && board.grid[i * board.cols_count + j] == board.grid[i * board.cols_count + k]) return false;
                 }
             }
+
+            if (board.solution[i * board.cols_count + j] == BLACK) {
+                if (i > 0 && board.solution[(i - 1) * board.cols_count + j] == BLACK) return false;
+                if (i < board.rows_count - 1 && board.solution[(i + 1) * board.cols_count + j] == BLACK) return false;
+                if (j > 0 && board.solution[i * board.cols_count + j - 1] == BLACK) return false;
+                if (j < board.cols_count - 1 && board.solution[i * board.cols_count + j + 1] == BLACK) return false;
+            }
         }
     }
+
+    if (!all_white_cells_connected(board)) return false;
 
     return true;
 }
@@ -1391,9 +1402,9 @@ bool single_recursive_set_cell(Board board, int* unknown_index, int* unknown_ind
 
         // if (DEBUG) print_board("Solution", board, SOLUTION);
 
-        bool result = has_unique_values(board) && all_white_cells_connected(board);
+        bool is_hitori_valid = check_hitori_conditions(board);
 
-        if (result) {
+        if (is_hitori_valid) {
             // if (DEBUG) printf("Solved by process %d\n", rank);
                 
             for (i = 0; i < size; i++) {
@@ -1405,7 +1416,7 @@ bool single_recursive_set_cell(Board board, int* unknown_index, int* unknown_ind
             solver_process = rank;
         }
 
-        return result;
+        return is_hitori_valid;
     }
 
     board_y_index = unknown_index[uk_x * board.cols_count + uk_y];
@@ -1544,7 +1555,7 @@ int main(int argc, char** argv) {
 
     Board final_solution = deep_copy(pruned_solution);
     double recursive_start_time = MPI_Wtime();
-    if (true) {
+    if (false) {
         int j, temp_index = 0;
         int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
         int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
