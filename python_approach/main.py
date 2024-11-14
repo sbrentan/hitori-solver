@@ -786,7 +786,7 @@ def read_hitori_example(file_name):
     return example
 
 # Read the example from the file
-example_file_name = 'ex1.txt'  # Replace with your file name
+example_file_name = 'ex2.txt'  # Replace with your file name
 ex = read_hitori_example(example_file_name)
 
-HitoriSolver(ex3).solve()
+HitoriSolver(ex).solve()
