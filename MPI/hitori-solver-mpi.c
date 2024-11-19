@@ -6,6 +6,7 @@
 
 #define MAX_BUFFER_SIZE 2048
 #define DEBUG false
+#define NUMRETRY 50
 
 typedef enum CellState {
     UNKNOWN = -1,
@@ -49,7 +50,7 @@ void read_board(int **board, int *rows_count, int *cols_count, int **solution) {
         Helper function to read the board from the input file.
     */
     
-    FILE *fp = fopen("../test-cases/inputs/input-20x20.txt", "r");
+    FILE *fp = fopen("../test-cases/inputs/input-8x8.txt", "r");
     
     if (fp == NULL) {
         printf("Could not open file.\n");
@@ -1383,7 +1384,9 @@ bool single_recursive_set_cell(Board board, int* unknown_index, int* unknown_ind
     // Get next unknown starting from previous unknown in uk_x, uk_y
 
     int stopping_flag = 0;
-    MPI_Test(&stopping_request, &stopping_flag, MPI_STATUS_IGNORE);
+
+    for (i = 0; i < NUMRETRY; i++)
+        MPI_Test(&stopping_request, &stopping_flag, MPI_STATUS_IGNORE);
     
     if (stopping_flag) {
         if (DEBUG) printf("Process %d received termination signal\n", rank);
@@ -1669,10 +1672,12 @@ int main(int argc, char** argv) {
         Write the final solution to the output file
     */
 
+    printf("[%d] Solution found by process %d\n", rank, solver_process);
+
     if (rank == solver_process) {
         write_solution(final_solution);
         char formatted_string[MAX_BUFFER_SIZE];
-        snprintf(formatted_string, MAX_BUFFER_SIZE, "Solution found by process %d", rank);
+        snprintf(formatted_string, MAX_BUFFER_SIZE, "\nSolution found by process %d", rank);
         print_board(formatted_string, final_solution, SOLUTION);
     }
 
