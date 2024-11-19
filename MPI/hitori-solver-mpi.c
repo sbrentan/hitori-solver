@@ -138,7 +138,7 @@ void print_board(char *title, Board board, BoardType type) {
         Helper function to print the board.
     */
     
-    printf("\n# --- %s --- #\n", title);
+    printf("# --- %s --- #\n", title);
 
     int i, j;
     for (i = 0; i < board.rows_count; i++) {
@@ -155,6 +155,7 @@ void print_board(char *title, Board board, BoardType type) {
         }
         printf("\n");
     }
+    printf("\n");
 }
 
 void free_memory(int *pointers[]) {
@@ -418,8 +419,7 @@ void mpi_scatter_board(Board board, ScatterType scatter_type, BoardType target_t
         with the remaining rows and columns (if any) being assigned to the first process.
     */
 
-    int i, j, k;
-    int offset = 0;
+    int i, offset = 0;
 
     int total_processes = (scatter_type == ROWS) ?
         (size > board.rows_count) ? board.rows_count : size :
@@ -637,7 +637,7 @@ Board mpi_set_black(Board board) {
     int *local_col, *counts_send_col, *displs_send_col;
     mpi_scatter_board(board, COLS, SOLUTION, &local_col, &counts_send_col, &displs_send_col);
 
-    int i, j, k;
+    int i, j;
     int local_row_solution[counts_send_row[rank]];
     int local_col_solution[counts_send_col[rank]];
 
@@ -1375,7 +1375,7 @@ bool check_hitori_conditions(Board board) {
 
 bool single_recursive_set_cell(Board board, int* unknown_index, int* unknown_index_length, int uk_x, int uk_y) {
     
-    int i, j, board_y_index;
+    int i, board_y_index;
     //printf("trying %d %d\n", uk_x, uk_y);
     //print_vector(unknown_index, board.rows_count * board.cols_count);
     //print_board("Recursive", board, SOLUTION);
@@ -1409,7 +1409,7 @@ bool single_recursive_set_cell(Board board, int* unknown_index, int* unknown_ind
                 
             for (i = 0; i < size; i++) {
                 if (i != rank) {
-                    MPI_Send(NULL, 0, MPI_INT, i, 0, MPI_COMM_WORLD);
+                    MPI_Send(&rank, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
                     if (DEBUG) printf("Sending termination signal from %d to %d\n", rank, i);
                 }
             }
@@ -1547,7 +1547,7 @@ int main(int argc, char** argv) {
         For each process, initialize a background task that waits for a termination signal
     */
     
-    MPI_Irecv(NULL, 0, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &stopping_request);
+    MPI_Irecv(&solver_process, 1, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &stopping_request);
 
     /*
         Apply the recursive backtracking algorithm to find the solution
@@ -1555,7 +1555,7 @@ int main(int argc, char** argv) {
 
     Board final_solution = deep_copy(pruned_solution);
     double recursive_start_time = MPI_Wtime();
-    if (false) {
+    if (true) {
         int j, temp_index = 0;
         int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
         int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
@@ -1655,8 +1655,6 @@ int main(int argc, char** argv) {
     /*
         Print all the times
     */
-
-    printf("\n\n");
     
     if (rank == 0) printf("Time for pruning part: %f\n", pruning_end_time - pruning_start_time);
 
@@ -1673,14 +1671,16 @@ int main(int argc, char** argv) {
 
     if (rank == solver_process) {
         write_solution(final_solution);
-        print_board("Solution", final_solution, SOLUTION);
+        char formatted_string[MAX_BUFFER_SIZE];
+        snprintf(formatted_string, MAX_BUFFER_SIZE, "Solution found by process %d", rank);
+        print_board(formatted_string, final_solution, SOLUTION);
     }
 
     /*
         Free the memory and finalize the MPI environment
     */
 
-    //free_memory((int *[]){board.grid, board.solution, pruned_solution.grid, pruned_solution.solution, final_solution.grid, final_solution.solution});
+    free_memory((int *[]){board.grid, board.solution, pruned_solution.grid, pruned_solution.solution, final_solution.grid, final_solution.solution});
 
     MPI_Finalize();
 
