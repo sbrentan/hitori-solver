@@ -1411,12 +1411,12 @@ bool single_recursive_set_cell(Board board, int* unknown_index, int* unknown_ind
         if (is_hitori_valid) {
             // if (DEBUG) printf("Solved by process %d\n", rank);
                 
-            for (i = 0; i < size; i++) {
+            /*for (i = 0; i < size; i++) {
                 if (i != rank) {
                     MPI_Send(&rank, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
                     if (DEBUG) printf("Sending termination signal from %d to %d\n", rank, i);
                 }
-            }
+            }*/
             solver_process = rank;
         }
 
@@ -1475,19 +1475,32 @@ bool single_recursive_set_cell(Board board, int* unknown_index, int* unknown_ind
     return false;
 }
 
+void restore_unknowns(Board *ref_board, int *unknown_index, int *unknown_index_length) {
+    Board board = *ref_board;
+    int i, j;
+    for (i = 0; i < board.rows_count; i++) {
+        for (j = 0; j < unknown_index_length[i]; j++) {
+            board.solution[i * board.cols_count + unknown_index[i * board.cols_count + j]] = UNKNOWN;
+        }
+    }
+}
+
 /* ------------------ MAIN ------------------ */
 
-void solution2_update_combinations(Board *ref_board, int *combinations_per_number, int *n_combinations_per_number, int *unknown_index, int *unknown_index_length, int combination_index, int combination_increase) {
+bool solution2_update_combinations(Board *ref_board, int *combinations_per_number, int *n_combinations_per_number, int *unknown_index, int *unknown_index_length, int combination_index, int combination_increase) {
 
     Board board = *ref_board;
 
     if (combination_index == 0) {
         printf("Invalid combination index\n");
-        return;
+        return false;
     }
     
+    bool valid = true;
     int final_combination = combination_index + combination_increase;
     int i, j, unknown_index_y, cell_value, cell_combinations_number, temp_combination_number = 1;
+
+    restore_unknowns(&board, unknown_index, unknown_index_length);
     
     int *combination_modified = malloc(board.cols_count * sizeof(int));
     for (i = board.rows_count - 1; i >= 0; i--) {
@@ -1501,16 +1514,21 @@ void solution2_update_combinations(Board *ref_board, int *combinations_per_numbe
                 temp_combination_number *= cell_combinations_number;
             }
             combination_modified[cell_value]++;
-
-            if (combinations_per_number[i * board.cols_count + cell_value] == combination_modified[cell_value])
+        
+            if (combinations_per_number[i * board.cols_count + cell_value] == combination_modified[cell_value]) 
                 board.solution[i * board.cols_count + unknown_index_y] = WHITE;
             else
                 board.solution[i * board.cols_count + unknown_index_y] = BLACK;
 
+            valid = single_is_cell_state_valid(board, i, unknown_index_y, board.solution[i * board.cols_count + unknown_index_y]);
+
+            if (!valid) break;
         }
     }
 
     free(combination_modified);
+
+    return valid;
 }
 
 void solution2(Board board) {
@@ -1581,25 +1599,51 @@ void solution2(Board board) {
 
     if (rank == 0) printf("Total combinations: %d\n", total_combinations);
 
+    int stopping_flag = 0;
+    int cycles_count = 0;
+    
     for (i = 1; i <= total_combinations; i += size) {
-        solution2_update_combinations(&board, combinations_per_number, n_combinations_per_number, unknown_index, unknown_index_length, i, rank);
-        
-        char formatted_string[MAX_BUFFER_SIZE];
-        snprintf(formatted_string, MAX_BUFFER_SIZE, "\n[%d] Solution %d", rank, i);
 
-        if (rank == 0) print_board(formatted_string, board, SOLUTION);
+        if (cycles_count % 50 == 0) {
+            MPI_Test(&stopping_request, &stopping_flag, MPI_STATUS_IGNORE);
+
+            if (stopping_flag) break;
+        }
+
+        bool is_valid = solution2_update_combinations(&board, combinations_per_number, n_combinations_per_number, unknown_index, unknown_index_length, i, rank);
+        
+        if (!is_valid) continue;
+
+        /*if (rank == 0 && DEBUG) {
+            char formatted_string[MAX_BUFFER_SIZE];
+            snprintf(formatted_string, MAX_BUFFER_SIZE, "\n[%d] Solution %d", rank, i);
+            print_board(formatted_string, board, SOLUTION);
+        }*/
+
         if (check_hitori_conditions(board)) {
-            print_board("Solution found", board, SOLUTION);
+            char formatted_string[MAX_BUFFER_SIZE];
+            snprintf(formatted_string, MAX_BUFFER_SIZE, "\n[%d] Solution found .)", rank);
+            print_board(formatted_string, board, SOLUTION);
+
+            for (i = 0; i < size; i++) {
+                if (i != rank) {
+                    MPI_Send(&rank, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+                    if (DEBUG) printf("Sending termination signal from %d to %d\n", rank, i);
+                }
+            }
+            solver_process = rank;
+
             break;
         }
-        break;
+
+        cycles_count++;
     }
     
-    MPI_Barrier(MPI_COMM_WORLD);
+    //MPI_Barrier(MPI_COMM_WORLD);
 
-    MPI_Finalize();
+    /* MPI_Finalize();
 
-    exit(0);
+    exit(0);*/
 }
 
 int main(int argc, char** argv) {
@@ -1684,7 +1728,7 @@ int main(int argc, char** argv) {
 
     Board final_solution = deep_copy(pruned_solution);
     double recursive_start_time = MPI_Wtime();
-    if (false) {
+    if (true) {
         int j, temp_index = 0;
         int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
         int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
