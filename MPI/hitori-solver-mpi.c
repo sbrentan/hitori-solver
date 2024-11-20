@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <stdbool.h>
 
 #define MAX_BUFFER_SIZE 2048
@@ -1476,6 +1477,131 @@ bool single_recursive_set_cell(Board board, int* unknown_index, int* unknown_ind
 
 /* ------------------ MAIN ------------------ */
 
+void solution2_update_combinations(Board *ref_board, int *combinations_per_number, int *n_combinations_per_number, int *unknown_index, int *unknown_index_length, int combination_index, int combination_increase) {
+
+    Board board = *ref_board;
+
+    if (combination_index == 0) {
+        printf("Invalid combination index\n");
+        return;
+    }
+    
+    int final_combination = combination_index + combination_increase;
+    int i, j, unknown_index_y, cell_value, cell_combinations_number, temp_combination_number = 1;
+    
+    int *combination_modified = malloc(board.cols_count * sizeof(int));
+    for (i = board.rows_count - 1; i >= 0; i--) {
+        memset(combination_modified, 0, board.cols_count * sizeof(int));
+        for (j = unknown_index_length[i] - 1; j >= 0; j--) {
+            unknown_index_y = unknown_index[i * board.cols_count + j];
+            cell_value = board.grid[i * board.cols_count + unknown_index_y] - 1;
+            if (combination_modified[cell_value] == 0) {
+                cell_combinations_number = n_combinations_per_number[i * board.cols_count + cell_value] + 1;
+                combinations_per_number[i * board.cols_count + cell_value] = (((final_combination - 1) / temp_combination_number) % cell_combinations_number) + 1;
+                temp_combination_number *= cell_combinations_number;
+            }
+            combination_modified[cell_value]++;
+
+            if (combinations_per_number[i * board.cols_count + cell_value] == combination_modified[cell_value])
+                board.solution[i * board.cols_count + unknown_index_y] = WHITE;
+            else
+                board.solution[i * board.cols_count + unknown_index_y] = BLACK;
+
+        }
+    }
+
+    free(combination_modified);
+}
+
+void solution2(Board board) {
+    int i, j, temp_index = 0;
+    int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
+    if (rank == 0) {
+        // Initialize the unknown index matrix with the indexes of the unknown cells to better scan them
+        for (i = 0; i < board.rows_count; i++) {
+            temp_index = 0;
+            for (j = 0; j < board.cols_count; j++) {
+                int cell_index = i * board.cols_count + j;
+                if (board.solution[cell_index] == UNKNOWN){
+                    unknown_index[i * board.cols_count + temp_index] = j;
+                    temp_index++;
+                }
+            }
+            unknown_index_length[i] = temp_index;
+            if (temp_index < board.cols_count)
+                unknown_index[i * board.cols_count + temp_index] = -1;
+        }
+
+        //print_vector(unknown_index, board.rows_count * board.cols_count);
+        //print_vector(unknown_index_length, board.rows_count);
+    }
+
+    MPI_Bcast(unknown_index, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(unknown_index_length, board.rows_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // first row of matrix has 2 cells with value=1
+    // if cpn of row 0 of value 2 is 1, then the first cell with value=1 from the left is white
+    // if cpn of row 0 of value 2 is 2, then the second cell with value=1 from the left is white
+    // if cpn of row 0 of value 2 is 3 (ncpn+1), then all cells with value=1 are black
+    int *combinations_per_number = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    int *n_combinations_per_number = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+
+    memset(combinations_per_number, 0, board.rows_count * board.cols_count * sizeof(int));
+    memset(n_combinations_per_number, 0, board.rows_count * board.cols_count * sizeof(int));
+
+    int value, total_combinations = 1;
+    for (i = 0; i < board.rows_count; i++) {
+        for (j = 0; j < unknown_index_length[i]; j++) {
+            value = board.grid[i * board.cols_count + unknown_index[i * board.cols_count + j]];
+            combinations_per_number[i * board.cols_count + value - 1] = 1;
+            n_combinations_per_number[i * board.cols_count + value - 1]++;
+        }
+    }
+    // print numbers of combinations per number
+    if(rank == 0) {
+        for (i = 0; i < board.rows_count; i++) {
+            for (j = 0; j < board.rows_count; j++) {
+                printf("%d ", n_combinations_per_number[i * board.cols_count + j]);
+            }
+            printf("\n");
+        }
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    sleep(1);
+    
+    for (i = 0; i < board.rows_count * board.cols_count; i++) {
+        if (n_combinations_per_number[i] == 0) continue;
+        total_combinations *= n_combinations_per_number[i] + 1;
+    }
+
+    MPI_Bcast(combinations_per_number, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(n_combinations_per_number, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) printf("Total combinations: %d\n", total_combinations);
+
+    for (i = 1; i <= total_combinations; i += size) {
+        solution2_update_combinations(&board, combinations_per_number, n_combinations_per_number, unknown_index, unknown_index_length, i, rank);
+        
+        char formatted_string[MAX_BUFFER_SIZE];
+        snprintf(formatted_string, MAX_BUFFER_SIZE, "\n[%d] Solution %d", rank, i);
+
+        if (rank == 0) print_board(formatted_string, board, SOLUTION);
+        if (check_hitori_conditions(board)) {
+            print_board("Solution found", board, SOLUTION);
+            break;
+        }
+        break;
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    MPI_Finalize();
+
+    exit(0);
+}
+
 int main(int argc, char** argv) {
 
     /*
@@ -1558,7 +1684,7 @@ int main(int argc, char** argv) {
 
     Board final_solution = deep_copy(pruned_solution);
     double recursive_start_time = MPI_Wtime();
-    if (true) {
+    if (false) {
         int j, temp_index = 0;
         int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
         int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
@@ -1633,6 +1759,9 @@ int main(int argc, char** argv) {
         // Loop
         // recursive function iterating unknown_index
         single_recursive_set_cell(final_solution, unknown_index, unknown_index_length, 0, 0);
+    } else {
+        // TODO: check that board is NxN with max number equal to N
+        solution2(final_solution);
     }
 
     /*

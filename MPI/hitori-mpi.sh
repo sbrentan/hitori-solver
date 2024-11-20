@@ -5,4 +5,4 @@
 
 module load mpich-3.2
 cd ./hitori-solver/MPI
-mpirun.actual -n 8 ./hitori-solver-mpi.out
+mpirun.actual -n 4 ./hitori-solver-mpi.out
