@@ -51,7 +51,7 @@ void read_board(int **board, int *rows_count, int *cols_count, int **solution) {
         Helper function to read the board from the input file.
     */
     
-    FILE *fp = fopen("../test-cases/inputs/input-8x8.txt", "r");
+    FILE *fp = fopen("../test-cases/inputs/input-20x20.txt", "r");
     
     if (fp == NULL) {
         printf("Could not open file.\n");
@@ -1224,6 +1224,7 @@ bool single_is_cell_state_valid(Board board, int x, int y, CellState cell_state)
         if (y < board.cols_count - 1 && board.solution[x * board.cols_count + y + 1] == BLACK) return false;
     } else if (cell_state == WHITE) {
         int i, j, cell_value = board.grid[x * board.cols_count + y];
+        // TODO: optimize this (if rows=columns) or use a sum table
         for (i = 0; i < board.rows_count; i++)
             if (i != x && board.grid[i * board.cols_count + y] == cell_value && board.solution[i * board.cols_count + y] == WHITE)
                 return false;
@@ -1485,8 +1486,6 @@ void restore_unknowns(Board *ref_board, int *unknown_index, int *unknown_index_l
     }
 }
 
-/* ------------------ MAIN ------------------ */
-
 bool solution2_update_combinations(Board *ref_board, int *combinations_per_number, int *n_combinations_per_number, int *unknown_index, int *unknown_index_length, int combination_index, int combination_increase) {
 
     Board board = *ref_board;
@@ -1529,6 +1528,187 @@ bool solution2_update_combinations(Board *ref_board, int *combinations_per_numbe
     free(combination_modified);
 
     return valid;
+}
+
+bool solution3_recursive_set_cell(Board board, int* unknown_index, int* unknown_index_length, int uk_x, int uk_y, int* solutions_to_skip) {
+
+    //printf("trying %d %d\n", uk_x, uk_y);
+    //print_vector(unknown_index, board.rows_count * board.cols_count);
+    //print_board("Recursive", board, SOLUTION);
+    //printf("Il valore della cella è %d\n", board.solution[uk_x * board.cols_count + unknown_index[uk_x * board.cols_count + uk_y]]);
+
+    // Get next unknown starting from previous unknown in uk_x, uk_y
+
+    int i, board_y_index, stopping_flag = 0;
+
+    // for (i = 0; i < NUMRETRY; i++)
+    MPI_Test(&stopping_request, &stopping_flag, MPI_STATUS_IGNORE);
+    
+    if (stopping_flag) {
+        if (DEBUG) printf("Process %d received termination signal\n", rank);
+        return true;
+    }
+    
+    while (uk_x < board.rows_count && uk_y >= unknown_index_length[uk_x]) {
+        uk_x++;
+        uk_y = 0;
+    }
+
+
+    if (uk_x == board.rows_count) {
+        if (*solutions_to_skip > 0) {
+            // printf("[%d] Skipping solution %d\n", rank, *solutions_to_skip);
+            (*solutions_to_skip)--;
+            return false;
+        } else {
+            *solutions_to_skip = size - 1;
+            // printf("[%d] Testing solution %d\n", rank, *solutions_to_skip);
+        }
+
+        bool is_hitori_valid = check_hitori_conditions(board);
+        if (is_hitori_valid) {
+            if (DEBUG) printf("Solved by process %d\n", rank);
+            for (i = 0; i < size; i++) {
+                if (i != rank) {
+                    MPI_Send(&rank, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+                    if (DEBUG) printf("Sending termination signal from %d to %d\n", rank, i);
+                }
+            }
+            solver_process = rank;
+        }
+
+        return is_hitori_valid;
+    }
+
+    board_y_index = unknown_index[uk_x * board.cols_count + uk_y];
+    //printf("UK trovato: Provo la cella %d %d\n", uk_x, uk_y);
+
+    // First check if setting this cell to white works, then try black
+    int cell_value = board.solution[uk_x * board.cols_count + board_y_index];
+    if (cell_value == UNKNOWN) {
+        //printf("Provo il bianco %d %d\n", uk_x, uk_y);
+        int *edited_cells, edited_count;
+        if (single_is_cell_state_valid(board, uk_x, board_y_index, WHITE)) {
+            board.solution[uk_x * board.cols_count + board_y_index] = WHITE;
+            single_set_white_and_black_cells(board, uk_x, board_y_index, WHITE, &edited_cells, &edited_count);
+            
+            // TODO: check if board is passed by reference and the recursive function sees the updated solution
+            if (solution3_recursive_set_cell(board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip))
+                return true;
+            
+            board = single_restore_white_and_black_cells(board, edited_cells, edited_count);
+        } //else printf("Non posso mettere il bianco %d %d\n", uk_x, uk_y);
+        
+        //printf("Provo il nero %d %d\n", uk_x, uk_y);
+        if (single_is_cell_state_valid(board, uk_x, board_y_index, BLACK)) {
+            board.solution[uk_x * board.cols_count + board_y_index] = BLACK;
+            single_set_white_and_black_cells(board, uk_x, board_y_index, BLACK, &edited_cells, &edited_count);
+            // TODO: check if board is passed by reference and the recursive function sees the updated solution
+            if (solution3_recursive_set_cell(board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip))
+                return true;
+
+            board = single_restore_white_and_black_cells(board, edited_cells, edited_count);
+        } //else printf("Non posso mettere il nero %d %d\n", uk_x, uk_y);
+    
+        board.solution[uk_x * board.cols_count + board_y_index] = UNKNOWN;
+
+    } else if (single_is_cell_state_valid(board, uk_x, board_y_index, cell_value)) {
+        //printf("Not unknown %d %d\n", uk_x, uk_y);
+        bool solution_found = solution3_recursive_set_cell(board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip);
+
+        //printf("Forced solution %d %d %d %d\n", uk_x, uk_y, cell_value, solution_found);
+
+        if (solution_found) return true;
+
+        cell_value = abs(cell_value - 1);
+        if (single_is_cell_state_valid(board, uk_x, board_y_index, cell_value)) {
+            board.solution[uk_x * board.cols_count + board_y_index] = cell_value;
+            solution_found = solution3_recursive_set_cell(board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip);
+
+            //printf("Forced solution [2] %d %d %d %d\n", uk_x, uk_y, cell_value, solution_found);
+        }
+    }
+
+    return false;
+}
+
+/* ------------------ MAIN ------------------ */
+
+void solution1(Board final_solution) {
+    int i, j, temp_index = 0;
+    int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
+    if (rank == 0) {
+        // Initialize the unknown index matrix with the indexes of the unknown cells to better scan them
+        for (i = 0; i < board.rows_count; i++) {
+            temp_index = 0;
+            for (j = 0; j < board.cols_count; j++) {
+                int cell_index = i * board.cols_count + j;
+                if (final_solution.solution[cell_index] == UNKNOWN){
+                    unknown_index[i * board.cols_count + temp_index] = j;
+                    temp_index++;
+                }
+            }
+            unknown_index_length[i] = temp_index;
+            if (temp_index < board.cols_count)
+                unknown_index[i * board.cols_count + temp_index] = -1;
+        }
+
+        //print_vector(unknown_index, board.rows_count * board.cols_count);
+        //print_vector(unknown_index_length, board.rows_count);
+    }
+
+    MPI_Bcast(unknown_index, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(unknown_index_length, board.rows_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Create initial starting solution depending on the rank of the process
+    // In this way, we define a sort of solution space for each process to analyse
+    int uk_idx, cell_choice, temp_rank = rank;
+    for (i = 0; i < board.rows_count; i++) {
+        for (j = 0; j < board.cols_count; j++) {
+            if (unknown_index[i * board.rows_count + j] == -1)
+                break;
+            uk_idx = unknown_index[i * board.rows_count + j];
+            cell_choice = temp_rank % 2;
+
+            //if (rank == 0) printf("[Cell choice] Rank %d: i=%d, j=%d, uk_idx=%d, cell_choice=%d\n", rank, i, j, uk_idx, cell_choice);
+
+            // Validate if cell_choice (black or white) here is valid
+            //      If not valid, use fixed choice and do not decrease temp_rank
+            //      If neither are valid, set to white (then the loop will change it)
+            if (!single_is_cell_state_valid(final_solution, i, uk_idx, cell_choice)) {
+                cell_choice = abs(cell_choice - 1);
+                if (!single_is_cell_state_valid(final_solution, i, uk_idx, cell_choice)) {
+                    cell_choice = UNKNOWN;
+                    continue;
+                }
+            }
+
+            //if (rank == 1) printf("[Updated] Rank %d: i=%d, j=%d, uk_idx=%d, cell_choice=%d\n", rank, i, j, uk_idx, cell_choice);
+
+            final_solution.solution[i * board.cols_count + uk_idx] = cell_choice;
+            final_solution = single_set_white_and_black_cells(final_solution, i, uk_idx, cell_choice, NULL, NULL);
+            //unknown_index[i * board.cols_count + j] = -2;  // ??
+            // set white and black cells (localised single process, no need to check all the matrix)
+            //      remember to update unknown_index (maybe add -2 as a value to ignore)
+
+            //if (rank == 1) print_board("[After coloring]", final_solution, SOLUTION);
+
+            if (temp_rank > 0)
+                temp_rank = temp_rank / 2;
+            
+            if (temp_rank == 0)
+                break;
+        }
+
+        if (temp_rank == 0)
+            break;
+    }
+
+    //print_board("Pruned sad", final_solution, SOLUTION);
+    // Loop
+    // recursive function iterating unknown_index
+    single_recursive_set_cell(final_solution, unknown_index, unknown_index_length, 0, 0);
 }
 
 void solution2(Board board) {
@@ -1646,6 +1826,41 @@ void solution2(Board board) {
     exit(0);*/
 }
 
+void solution3(Board final_solution) {
+    
+    int i, j, temp_index = 0;
+    int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
+    if (rank == 0) {
+        // Initialize the unknown index matrix with the indexes of the unknown cells to better scan them
+        for (i = 0; i < board.rows_count; i++) {
+            temp_index = 0;
+            for (j = 0; j < board.cols_count; j++) {
+                int cell_index = i * board.cols_count + j;
+                if (final_solution.solution[cell_index] == UNKNOWN){
+                    unknown_index[i * board.cols_count + temp_index] = j;
+                    temp_index++;
+                }
+            }
+            unknown_index_length[i] = temp_index;
+            if (temp_index < board.cols_count)
+                unknown_index[i * board.cols_count + temp_index] = -1;
+        }
+
+        //print_vector(unknown_index, board.rows_count * board.cols_count);
+        //print_vector(unknown_index_length, board.rows_count);
+    }
+
+    MPI_Bcast(unknown_index, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(unknown_index_length, board.rows_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+    //print_board("Pruned sad", final_solution, SOLUTION);
+    // Loop
+    // recursive function iterating unknown_index
+    int solutions_to_skip = rank;
+    solution3_recursive_set_cell(final_solution, unknown_index, unknown_index_length, 0, 0, &solutions_to_skip);
+}
+
 int main(int argc, char** argv) {
 
     /*
@@ -1662,6 +1877,8 @@ int main(int argc, char** argv) {
     */
 
     if (rank == 0) read_board(&board.grid, &board.rows_count, &board.cols_count, &board.solution);
+    
+    // TODO: check that board is NxN with max number equal to N
     
     /*
         Share the board with all the processes by packing the data into a single array
@@ -1728,85 +1945,13 @@ int main(int argc, char** argv) {
 
     Board final_solution = deep_copy(pruned_solution);
     double recursive_start_time = MPI_Wtime();
-    if (true) {
-        int j, temp_index = 0;
-        int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
-        int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
-        if (rank == 0) {
-            // Initialize the unknown index matrix with the indexes of the unknown cells to better scan them
-            for (i = 0; i < board.rows_count; i++) {
-                temp_index = 0;
-                for (j = 0; j < board.cols_count; j++) {
-                    int cell_index = i * board.cols_count + j;
-                    if (final_solution.solution[cell_index] == UNKNOWN){
-                        unknown_index[i * board.cols_count + temp_index] = j;
-                        temp_index++;
-                    }
-                }
-                unknown_index_length[i] = temp_index;
-                if (temp_index < board.cols_count)
-                    unknown_index[i * board.cols_count + temp_index] = -1;
-            }
+    
+    // solution1(final_solution);
 
-            //print_vector(unknown_index, board.rows_count * board.cols_count);
-            //print_vector(unknown_index_length, board.rows_count);
-        }
+    // solution2(final_solution);
 
-        MPI_Bcast(unknown_index, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
-        MPI_Bcast(unknown_index_length, board.rows_count, MPI_INT, 0, MPI_COMM_WORLD);
+    solution3(final_solution);
 
-        // Create initial starting solution depending on the rank of the process
-        // In this way, we define a sort of solution space for each process to analyse
-        int uk_idx, cell_choice, temp_rank = rank;
-        for (i = 0; i < board.rows_count; i++) {
-            for (j = 0; j < board.cols_count; j++) {
-                if (unknown_index[i * board.rows_count + j] == -1)
-                    break;
-                uk_idx = unknown_index[i * board.rows_count + j];
-                cell_choice = temp_rank % 2;
-
-                //if (rank == 0) printf("[Cell choice] Rank %d: i=%d, j=%d, uk_idx=%d, cell_choice=%d\n", rank, i, j, uk_idx, cell_choice);
-
-                // Validate if cell_choice (black or white) here is valid
-                //      If not valid, use fixed choice and do not decrease temp_rank
-                //      If neither are valid, set to white (then the loop will change it)
-                if (!single_is_cell_state_valid(final_solution, i, uk_idx, cell_choice)) {
-                    cell_choice = abs(cell_choice - 1);
-                    if (!single_is_cell_state_valid(final_solution, i, uk_idx, cell_choice)) {
-                        cell_choice = UNKNOWN;
-                        continue;
-                    }
-                }
-
-                //if (rank == 1) printf("[Updated] Rank %d: i=%d, j=%d, uk_idx=%d, cell_choice=%d\n", rank, i, j, uk_idx, cell_choice);
-
-                final_solution.solution[i * board.cols_count + uk_idx] = cell_choice;
-                final_solution = single_set_white_and_black_cells(final_solution, i, uk_idx, cell_choice, NULL, NULL);
-                //unknown_index[i * board.cols_count + j] = -2;  // ??
-                // set white and black cells (localised single process, no need to check all the matrix)
-                //      remember to update unknown_index (maybe add -2 as a value to ignore)
-
-                //if (rank == 1) print_board("[After coloring]", final_solution, SOLUTION);
-
-                if (temp_rank > 0)
-                    temp_rank = temp_rank / 2;
-                
-                if (temp_rank == 0)
-                    break;
-            }
-
-            if (temp_rank == 0)
-                break;
-        }
-
-        //print_board("Pruned sad", final_solution, SOLUTION);
-        // Loop
-        // recursive function iterating unknown_index
-        single_recursive_set_cell(final_solution, unknown_index, unknown_index_length, 0, 0);
-    } else {
-        // TODO: check that board is NxN with max number equal to N
-        solution2(final_solution);
-    }
 
     /*
         All the processes that finish early, with the solution not been found, will remain idle.
