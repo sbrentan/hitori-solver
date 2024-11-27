@@ -4,10 +4,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <math.h>
 
 #define MAX_BUFFER_SIZE 2048
 #define DEBUG false
-#define NUMRETRY 50
+#define SOLUTION_SPACES 4
 
 typedef enum CellState {
     UNKNOWN = -1,
@@ -39,8 +40,16 @@ typedef struct Board {
     int *solution;
 } Board;
 
+typedef struct {
+    __int128_t items[SOLUTION_SPACES];
+    int front;
+    int rear;
+} Queue;
+
 int rank, size, solver_process = -1;
+double ctime = 0;
 Board board;
+Queue solution_queue;
 MPI_Request stopping_request;
 
 /* ------------------ GENERAL HELPERS ------------------ */
@@ -51,7 +60,7 @@ void read_board(int **board, int *rows_count, int *cols_count, int **solution) {
         Helper function to read the board from the input file.
     */
     
-    FILE *fp = fopen("../test-cases/inputs/input-20x20.txt", "r");
+    FILE *fp = fopen("../test-cases/inputs/input-6x6.txt", "r");
     
     if (fp == NULL) {
         printf("Could not open file.\n");
@@ -74,6 +83,11 @@ void read_board(int **board, int *rows_count, int *cols_count, int **solution) {
 
     *rows_count = rows;
     *cols_count = cols;
+
+    if (rows != cols) {
+        printf("The board must be a square.\n");
+        exit(1);
+    }
 
     *board = (int *) malloc(rows * cols * sizeof(int));
     *solution = (int *) malloc(rows * cols * sizeof(int));
@@ -362,6 +376,86 @@ Board mpi_compute_and_share(Board board, int *row_solution, int *col_solution, b
     return solution;
 }
 
+/* ------------------ QUEUE HELPERS ------------------ */
+
+// Function to initialize the queue
+void initializeQueue(Queue* q)
+{
+    q->front = -1;
+    q->rear = -1;
+}
+
+int isFull(Queue* q)
+{
+    // If the next position is the front, the queue is full
+    return (q->rear + 1) % SOLUTION_SPACES == q->front;
+}
+
+// Function to check if the queue is empty
+bool isEmpty(Queue* q) {
+    return q->front == -1;
+}
+
+void enqueue(Queue *q, __int128_t value)
+{
+    // If the queue is full, print an error message and
+    // return
+    if (isFull(q)) {
+        printf("Queue overflow\n");
+        return;
+    }
+    // If the queue is empty, set the front to the first
+    // position
+    if (q->front == -1) {
+        q->front = 0;
+    }
+    // Add the data to the queue and move the rear pointer
+    q->rear = (q->rear + 1) % SOLUTION_SPACES;
+    q->items[q->rear] = value;
+    //printf("Element %lld inserted\n", value);
+}
+
+__int128_t dequeue(Queue* q)
+{
+    // If the queue is empty, print an error message and
+    // return -1
+    if (isEmpty(q)) {
+        printf("Queue underflow\n");
+        return -1;
+    }
+    // Get the data from the front of the queue
+    __int128_t data = q->items[q->front];
+    // If the front and rear pointers are at the same
+    // position, reset them
+    if (q->front == q->rear) {
+        q->front = q->rear = -1;
+    }
+    else {
+        // Otherwise, move the front pointer to the next
+        // position
+        q->front = (q->front + 1) % SOLUTION_SPACES;
+    }
+    // Return the dequeued data
+    return data;
+}
+
+void printQueue(Queue* q)
+{
+    // If the queue is empty, print a message and return
+    if (isEmpty(q)) {
+        printf("Queue is empty\n");
+        return;
+    }
+    // Print the elements in the queue
+    printf("Queue elements: ");
+    int i = q->front;
+    while (i != q->rear) {
+        printf("%lld ", q->items[i]);
+        i = (i + 1) % SOLUTION_SPACES;
+    }
+    // Print the last element
+    printf("%lld\n", q->items[q->rear]);
+}
 /* ------------------ MPI UTILS ------------------ */
 
 void mpi_share_board(Board board, Board *local_board) {
@@ -1233,7 +1327,7 @@ bool single_is_cell_state_valid(Board board, int x, int y, CellState cell_state)
                 return false;
     }
     return true;
-}
+}   
 
 Board single_set_white_and_black_cells(Board board, int x, int y, CellState cell_state, int **edited_cells, int *edited_count) {
     
@@ -1387,8 +1481,7 @@ bool single_recursive_set_cell(Board board, int* unknown_index, int* unknown_ind
 
     int stopping_flag = 0;
 
-    for (i = 0; i < NUMRETRY; i++)
-        MPI_Test(&stopping_request, &stopping_flag, MPI_STATUS_IGNORE);
+    MPI_Test(&stopping_request, &stopping_flag, MPI_STATUS_IGNORE);
     
     if (stopping_flag) {
         if (DEBUG) printf("Process %d received termination signal\n", rank);
@@ -1412,12 +1505,12 @@ bool single_recursive_set_cell(Board board, int* unknown_index, int* unknown_ind
         if (is_hitori_valid) {
             // if (DEBUG) printf("Solved by process %d\n", rank);
                 
-            /*for (i = 0; i < size; i++) {
+            for (i = 0; i < size; i++) {
                 if (i != rank) {
                     MPI_Send(&rank, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
                     if (DEBUG) printf("Sending termination signal from %d to %d\n", rank, i);
                 }
-            }*/
+            }
             solver_process = rank;
         }
 
@@ -1530,7 +1623,9 @@ bool solution2_update_combinations(Board *ref_board, int *combinations_per_numbe
     return valid;
 }
 
-bool solution3_recursive_set_cell(Board board, int* unknown_index, int* unknown_index_length, int uk_x, int uk_y, int* solutions_to_skip) {
+bool solution3_recursive_set_cell(Board *ref_board, int* unknown_index, int* unknown_index_length, int uk_x, int uk_y, int* solutions_to_skip) {
+
+    Board board = *ref_board;
 
     //printf("trying %d %d\n", uk_x, uk_y);
     //print_vector(unknown_index, board.rows_count * board.cols_count);
@@ -1541,7 +1636,6 @@ bool solution3_recursive_set_cell(Board board, int* unknown_index, int* unknown_
 
     int i, board_y_index, stopping_flag = 0;
 
-    // for (i = 0; i < NUMRETRY; i++)
     MPI_Test(&stopping_request, &stopping_flag, MPI_STATUS_IGNORE);
     
     if (stopping_flag) {
@@ -1565,7 +1659,10 @@ bool solution3_recursive_set_cell(Board board, int* unknown_index, int* unknown_
             // printf("[%d] Testing solution %d\n", rank, *solutions_to_skip);
         }
 
+        double ttime = MPI_Wtime();
         bool is_hitori_valid = check_hitori_conditions(board);
+        ctime += MPI_Wtime() - ttime; 
+
         if (is_hitori_valid) {
             if (DEBUG) printf("Solved by process %d\n", rank);
             for (i = 0; i < size; i++) {
@@ -1593,7 +1690,7 @@ bool solution3_recursive_set_cell(Board board, int* unknown_index, int* unknown_
             single_set_white_and_black_cells(board, uk_x, board_y_index, WHITE, &edited_cells, &edited_count);
             
             // TODO: check if board is passed by reference and the recursive function sees the updated solution
-            if (solution3_recursive_set_cell(board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip))
+            if (solution3_recursive_set_cell(&board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip))
                 return true;
             
             board = single_restore_white_and_black_cells(board, edited_cells, edited_count);
@@ -1604,7 +1701,7 @@ bool solution3_recursive_set_cell(Board board, int* unknown_index, int* unknown_
             board.solution[uk_x * board.cols_count + board_y_index] = BLACK;
             single_set_white_and_black_cells(board, uk_x, board_y_index, BLACK, &edited_cells, &edited_count);
             // TODO: check if board is passed by reference and the recursive function sees the updated solution
-            if (solution3_recursive_set_cell(board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip))
+            if (solution3_recursive_set_cell(&board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip))
                 return true;
 
             board = single_restore_white_and_black_cells(board, edited_cells, edited_count);
@@ -1614,24 +1711,128 @@ bool solution3_recursive_set_cell(Board board, int* unknown_index, int* unknown_
 
     } else if (single_is_cell_state_valid(board, uk_x, board_y_index, cell_value)) {
         //printf("Not unknown %d %d\n", uk_x, uk_y);
-        bool solution_found = solution3_recursive_set_cell(board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip);
+        bool solution_found = solution3_recursive_set_cell(&board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip);
 
         //printf("Forced solution %d %d %d %d\n", uk_x, uk_y, cell_value, solution_found);
 
         if (solution_found) return true;
 
-        cell_value = abs(cell_value - 1);
-        if (single_is_cell_state_valid(board, uk_x, board_y_index, cell_value)) {
-            board.solution[uk_x * board.cols_count + board_y_index] = cell_value;
-            solution_found = solution3_recursive_set_cell(board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip);
+        // cell_value = abs(cell_value - 1);
+        // if (single_is_cell_state_valid(board, uk_x, board_y_index, cell_value)) {
+        //     board.solution[uk_x * board.cols_count + board_y_index] = cell_value;
+        //     solution_found = solution3_recursive_set_cell(&board, unknown_index, unknown_index_length, uk_x, uk_y + 1, solutions_to_skip);
 
-            //printf("Forced solution [2] %d %d %d %d\n", uk_x, uk_y, cell_value, solution_found);
-        }
+        //     //printf("Forced solution [2] %d %d %d %d\n", uk_x, uk_y, cell_value, solution_found);
+        // }
     }
 
     return false;
 }
 
+bool solution4_build_leaf(Board *ref_board, int* unknown_index, int* unknown_index_length, int uk_x, int uk_y, int uk_idx, __int128_t *solution_id, __int128_t *solution_rest) {
+    Board board = *ref_board;
+    
+    int i, board_y_index;
+    while (uk_x < board.rows_count && uk_y >= unknown_index_length[uk_x]) {
+        uk_x++;
+        uk_y = 0;
+    }
+
+    if (uk_x == board.rows_count) {
+        // TODO: validate solution
+        // if (rank == 1) print_board("Testing solution", board, SOLUTION);
+        // if (check_hitori_conditions(board)) {
+        //     printf("Solution found\n");
+        //     return true;
+        // }
+        // return false;
+        return true;
+    }
+
+    board_y_index = unknown_index[uk_x * board.cols_count + uk_y];
+
+    // if (rank == 1) printf("Trying %d %d %d\n", uk_x, uk_y, uk_idx);
+
+    __int128_t uk_idx_pow = pow(2, uk_idx);
+    __int128_t local_rest = 0;
+    CellState cell_state = ((*solution_id) / uk_idx_pow) % 2;
+    
+    // if (rank == 1) printf("Cell state: %d, pow: %lld\n", cell_state, uk_idx_pow);
+    
+    for (i = 0; i < 2; i++) {
+        // if (rank == 1) printf("Trying cell %d: %lld", cell_state, *solution_id);
+        if (single_is_cell_state_valid(board, uk_x, board_y_index, cell_state)) {
+            board.solution[uk_x * board.cols_count + board_y_index] = cell_state;
+            local_rest = cell_state * uk_idx_pow;
+            *solution_rest += local_rest;
+            // if (rank == 1) printf(" - Valid, rest: %lld\n", *solution_rest);
+            if (solution4_build_leaf(ref_board, unknown_index, unknown_index_length, uk_x, uk_y + 1, uk_idx + 1, solution_id, solution_rest))
+                return true;
+            *solution_rest -= local_rest;
+            // if (rank == 1) printf(" - Local rest %lld -- ", local_rest);
+            // if (rank == 1) printf("Restoring %d %d %d: %lld\n", uk_x, uk_y, uk_idx, *solution_rest); 
+        } else {
+            // if (rank == 1) printf(" - Invalid\n");
+        }
+        
+        // Change cell state
+        if (cell_state == WHITE) {
+            cell_state = BLACK;
+            *solution_id = *solution_id - (*solution_id - *solution_rest) + uk_idx_pow;
+            // if (rank == 1) printf("Changing to black: %lld\n", *solution_id);
+        }
+        else
+            break;
+    }
+    board.solution[uk_x * board.cols_count + board_y_index] = UNKNOWN;
+    return false;
+}
+
+bool solution4_next_leaf(Board *ref_board, int* unknown_index, int* unknown_index_length, __int128_t *solution_id) {
+
+    // compute total unknowns
+    int total_unknowns = 0, i, j;
+    for (i = 0; i < board.rows_count; i++)
+        for (j = 0; j < board.cols_count; j++)
+            if (board.solution[i * board.cols_count + j] == UNKNOWN)
+                total_unknowns++;
+    
+    int temp_unknowns = total_unknowns;
+    int uk_x, uk_y, uk_idx_pow;
+    // find next white cell iterating unknowns from bottom
+    for (i = board.rows_count - 1; i >= 0; i--) {
+        for (j = unknown_index_length[i] - 1; j >= 0; j--) {
+            uk_x = i;
+            uk_y = unknown_index[i * board.cols_count + j];
+            uk_idx_pow = pow(2, temp_unknowns);
+            if (board.solution[uk_x * board.cols_count + uk_y] == WHITE) {
+                if (single_is_cell_state_valid(board, uk_x, uk_y, BLACK)) {
+                    board.solution[uk_x * board.cols_count + uk_y] = BLACK;
+                    *solution_id += uk_idx_pow;
+                    __int128_t *temp_rest = malloc(sizeof(__int128_t));
+                    *temp_rest = *solution_id;
+                    if(solution4_build_leaf(ref_board, unknown_index, unknown_index_length, uk_x, uk_y + 1, temp_unknowns, solution_id, temp_rest))
+                        return true;
+                    *solution_id -= uk_idx_pow;
+                }
+            } else {
+                *solution_id -= uk_idx_pow;
+            }
+            board.solution[uk_x * board.cols_count + uk_y] = UNKNOWN;
+            temp_unknowns--;
+        }
+    }
+    return false;
+}
+
+// 1010  ->  101-  ->  10--  ->  0110 -> 6
+// 1010(10) - 1000(= 10 - 2) = 0010 + 100(pow(2, 2)) = 0110
+// 10101X111  -> 000001111 (101010111 + 1000) - 101010000
+// 101010111 - 101010000(= 101010111 - 111) = 000000111 + 1000 = 000001111
+
+// 100101 (10X101)
+// 100101(69) - 100000(= 100101 - 101) = 000101 + 1000(pow(2, 3)) = 001101
+// 100000 -> 69 - 5
 /* ------------------ MAIN ------------------ */
 
 void solution1(Board final_solution) {
@@ -1858,7 +2059,130 @@ void solution3(Board final_solution) {
     // Loop
     // recursive function iterating unknown_index
     int solutions_to_skip = rank;
-    solution3_recursive_set_cell(final_solution, unknown_index, unknown_index_length, 0, 0, &solutions_to_skip);
+    solution3_recursive_set_cell(&final_solution, unknown_index, unknown_index_length, 0, 0, &solutions_to_skip);
+}
+
+void solution4(Board board) {
+    
+
+    // ======================================= UNKNOWN INDEX ======================================= //
+
+    int i, j, temp_index = 0;
+    int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
+    if (rank == 0) {
+        // Initialize the unknown index matrix with the indexes of the unknown cells to better scan them
+        for (i = 0; i < board.rows_count; i++) {
+            temp_index = 0;
+            for (j = 0; j < board.cols_count; j++) {
+                int cell_index = i * board.cols_count + j;
+                if (board.solution[cell_index] == UNKNOWN){
+                    unknown_index[i * board.cols_count + temp_index] = j;
+                    temp_index++;
+                }
+            }
+            unknown_index_length[i] = temp_index;
+            if (temp_index < board.cols_count)
+                unknown_index[i * board.cols_count + temp_index] = -1;
+        }
+    }
+
+    MPI_Bcast(unknown_index, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(unknown_index_length, board.rows_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+
+    // ======================================= COMBINATIONS COUNT ======================================= //
+    
+
+    __int128_t total_combinations;
+
+    int unknown_count = 0;
+    for (i = 0; i < board.rows_count; i++)
+        unknown_count += unknown_index_length[i];
+     
+    if (unknown_count > 127) {
+        printf("Too many unknown cells\n");
+        return;
+    }
+    total_combinations = pow(2, unknown_count);
+
+    // print __int128_t
+    
+    printf("%lld\n", total_combinations);
+
+
+
+    // ======================================= SOLUTION 4 ======================================= //
+
+
+    __int128_t solution_space_size = total_combinations / SOLUTION_SPACES;
+    __int128_t start_solution = rank;
+    __int128_t solution_rest;
+    //__int128_t end_solution = (rank + 1) * solution_space_size;
+
+    // TODO: manage when processors different then SOLUTION SPACES
+
+    int count = 0;
+    int temp_space_manager[SOLUTION_SPACES];
+    memset(temp_space_manager, -1, SOLUTION_SPACES * sizeof(int));
+    for (j = rank; j < SOLUTION_SPACES; j += size)
+        temp_space_manager[count++] = j;
+
+    int solution_space_manager[size][SOLUTION_SPACES];
+    MPI_Allgather(temp_space_manager, SOLUTION_SPACES, MPI_INT, solution_space_manager, SOLUTION_SPACES, MPI_INT, MPI_COMM_WORLD);
+
+    // for (i = 0; i < SOLUTION_SPACES; i++) {
+    //     printf("Processor %d, %d: %d\n", rank, i, solution_space_manager[rank][i]);
+    // }
+    bool leaf_found = false;
+
+    for (i = 0; i < SOLUTION_SPACES; i++) {
+        if (solution_space_manager[rank][i] == -1) break;
+        if (solution_space_manager[rank][i] == rank) {
+            leaf_found = solution4_build_leaf(&board, unknown_index, unknown_index_length, 0, 0, 0, &start_solution, &solution_rest);
+            
+            if (check_hitori_conditions(board)) {
+                printf("[%d] Solution found\n", rank);
+                return;
+            }
+
+            enqueue(&solution_queue, start_solution);
+            break;
+        }
+    }
+
+    if (rank == 1) {
+
+        while(!isEmpty(&solution_queue)) {
+
+            //if (rank == 0) printQueue(&solution_queue);
+
+            __int128_t current_solution = dequeue(&solution_queue);
+
+            //if (rank == 0) printQueue(&solution_queue);
+
+            leaf_found = solution4_next_leaf(&board, unknown_index, unknown_index_length, &current_solution);
+
+            // TODO: add check for reaching solution space end
+            if (leaf_found) {
+                // if (rank == 1) print_board("Testing solution", board, SOLUTION);
+                if (check_hitori_conditions(board)) {
+                    printf("[%d] Solution found\n", rank);
+                    print_board("Solution", board, SOLUTION);
+                    return;
+                } else {
+                    enqueue(&solution_queue, current_solution);
+                }
+
+            } else {
+                // TODO: if no leaf found, ask other processes for their solution spaces
+            }
+        }
+    }
+    
+    printf("Processor %d is finished\n", rank);
+    
+    // TODO: take work from other processes
 }
 
 int main(int argc, char** argv) {
@@ -1871,6 +2195,8 @@ int main(int argc, char** argv) {
 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    initializeQueue(&solution_queue);
 
     /*
         Read the board from the input file
@@ -1950,7 +2276,9 @@ int main(int argc, char** argv) {
 
     // solution2(final_solution);
 
-    solution3(final_solution);
+    // solution3(final_solution);
+
+    solution4(final_solution);
 
 
     /*
@@ -1985,6 +2313,9 @@ int main(int argc, char** argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
+    printf("[%d] Time for check hitori part: %f\n", rank, ctime);
+
+    MPI_Barrier(MPI_COMM_WORLD);
     
     /*
         Write the final solution to the output file
