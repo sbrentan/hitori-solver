@@ -73,12 +73,14 @@ void read_board(int **board, int *rows_count, int *cols_count, CellState **solut
         Helper function to read the board from the input file.
     */
     
-    FILE *fp = fopen("../test-cases/inputs/generated-20x20.txt", "r");
+    FILE *fp = fopen("../test-cases/inputs/generated-20x20-python.txt", "r");
     
     if (fp == NULL) {
         printf("Could not open file.\n");
         exit(1);
     }
+
+    printf("Reading board...\n");
 
     char line[MAX_BUFFER_SIZE];
     
@@ -97,6 +99,9 @@ void read_board(int **board, int *rows_count, int *cols_count, CellState **solut
     *rows_count = rows;
     *cols_count = cols;
 
+    printf("Rows: %d\n", rows);
+    printf("Cols: %d\n", cols);
+
     if (rows != cols) {
         printf("The board must be a square.\n");
         exit(1);
@@ -104,6 +109,14 @@ void read_board(int **board, int *rows_count, int *cols_count, CellState **solut
 
     *board = (int *) malloc(rows * cols * sizeof(int));
     *solution = (int *) malloc(rows * cols * sizeof(CellState));
+    
+    int i, j;
+    for (i = 0; i < rows; i++) {
+        for (j = 0; j < cols; j++) {
+            printf("i: %d, j: %d\n", i, j);
+            break;
+        }
+    }
 
     rewind(fp);
 
