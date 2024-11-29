@@ -8,7 +8,7 @@
 
 #define MAX_BUFFER_SIZE 2048
 #define DEBUG false
-#define SOLUTION_SPACES 4
+#define SOLUTION_SPACES 8
 
 typedef enum CellState {
     UNKNOWN = -1,
@@ -73,7 +73,7 @@ void read_board(int **board, int *rows_count, int *cols_count, CellState **solut
         Helper function to read the board from the input file.
     */
     
-    FILE *fp = fopen("../test-cases/inputs/generated-20x20-python.txt", "r");
+    FILE *fp = fopen("../test-cases/inputs/input-20x20.txt", "r");
     
     if (fp == NULL) {
         printf("Could not open file.\n");
@@ -217,6 +217,15 @@ void print_block(char *title, BCB* block) {
                 printf("X ");
             else 
                 printf("? ");
+        }
+        printf("\n");
+    }
+
+    printf("\n --- Unknowns --- \n");
+
+    for (i = 0; i < board.rows_count; i++) {
+        for (j = 0; j < board.cols_count; j++) {
+            printf("%d ", block->solution_space_unknowns[i * board.cols_count + j]); 
         }
         printf("\n");
     }
@@ -2009,6 +2018,10 @@ bool solution4_next_leaf(Board *ref_board, int* unknown_index, int* unknown_inde
 // 100000 -> 69 - 5
 
 bool solution5_build_leaf(BCB* block, int uk_x, int uk_y) {
+
+    /* if (!block->solution_space_unknowns[0] || !block->solution_space_unknowns[15] || !block->solution_space_unknowns[16]) {
+        printf("[Build leaf] Error in solution space unknowns\n");
+    } */
     
     int i, board_y_index;
     while (uk_x < board.rows_count && uk_y >= unknown_index_length[uk_x]) {
@@ -2057,6 +2070,11 @@ bool solution5_build_leaf(BCB* block, int uk_x, int uk_y) {
 bool solution5_next_leaf(BCB *block) {
     int i, j, board_y_index;
     CellState cell_state;
+
+    /* if (!block->solution_space_unknowns[0] || !block->solution_space_unknowns[15] || !block->solution_space_unknowns[16]) {
+        printf("[Next leaf] Error in solution space unknowns\n");
+    } */
+
     // find next white cell iterating unknowns from bottom
     for (i = board.rows_count - 1; i >= 0; i--) {
         for (j = unknown_index_length[i] - 1; j >= 0; j--) {
@@ -2562,19 +2580,19 @@ bool solution5() {
     }
 
     // print solution space manager
-    // if (rank == 0) {
-    //     printf("Processor %d:\n", rank);
-    //     for (i = 0; i < SOLUTION_SPACES; i++) {
-    //         printf("    %d: %d\n", i, solution_space_manager[i]);
-    //     }
-    //     printf("\n");
+    if (rank == 0) {
+        printf("Processor %d:\n", rank);
+        for (i = 0; i < SOLUTION_SPACES; i++) {
+            printf("    %d: %d\n", i, solution_space_manager[i]);
+        }
+        printf("\n");
         
-    //     printf("Processor %d:\n", rank);
-    //     for (i = 0; i < SOLUTION_SPACES; i++) {
-    //         printf("    %d: %d\n", i, my_solution_spaces[i]);
-    //     }
-    //     printf("\n");
-    // }
+        printf("Processor %d:\n", rank);
+        for (i = 0; i < SOLUTION_SPACES; i++) {
+            printf("    %d: %d\n", i, my_solution_spaces[i]);
+        }
+        printf("\n");
+    }
 
     bool leaf_found = false;
     BCB blocks[SOLUTION_SPACES];
@@ -2598,7 +2616,13 @@ bool solution5() {
 
         if (leaf_found) {
             enqueue(&solution_queue, &blocks[i]);
+        } else {
+            printf("Processor %d failed to find a leaf\n", rank);
         }
+    }
+
+    if (rank == 0) {
+        print_block("First", &blocks[0]);
     }
 
     // if (rank == 2) print_board("First", board, SOLUTION);
@@ -2670,7 +2694,18 @@ int main(int argc, char** argv) {
         ALTERNATIVE: use MPI_Datatype to create a custom datatype for the board (necessitate the struct to have non-dynamic arrays)
     */
     
-    mpi_share_board(board, &board);
+    // mpi_share_board(board, &board);
+
+    MPI_Bcast(&board.rows_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&board.cols_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    
+    if (rank != 0) {
+        board.grid = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+        board.solution = (CellState *) malloc(board.rows_count * board.cols_count * sizeof(CellState));
+    }
+
+    MPI_Bcast(board.grid, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(board.solution, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
 
     /*
         Apply the basic hitori pruning techniques to the board.
