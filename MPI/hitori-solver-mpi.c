@@ -58,12 +58,34 @@ typedef struct {
     int rear;
 } Queue;
 
+// TODO: comment these messages
+typedef enum Message {
+    TERMINATE = 1,
+    SEND_JOB = 2,
+    SEND_STATUS = 3,
+    SHARE_SOLUTION_SPACE = 4,
+    FREE_STATUS = 5
+} Message;
+
+typedef struct StatusMessage {
+    int queue_size;
+    int processes_per_solution_space;  // Number of processes working on the solution space (is set != 0 only when queue_size == 1)
+} StatusMessage;
+
 int rank, size, solver_process = -1;
 double ctime = 0;
 Board board;
 Queue solution_queue;
-MPI_Request stopping_request;
+MPI_Request message_request;
 int *unknown_index, *unknown_index_length;
+MPI_Datatype MPI_StatusMessage;
+
+// TODO: comment these functions
+int process_asking_status = -1;
+int count_processes_sharing_solution_space = 1;
+int *processes_sharing_solution_space;
+int shared_solution_space_order = 0;  // Indicates the number of solutions to skip when working on a shared solution space
+bool is_my_solution_spaces_ended = false;
 
 /* ------------------ GENERAL HELPERS ------------------ */
 
@@ -409,6 +431,15 @@ int isFull(Queue* q) {
     return (q->rear + 1) % SOLUTION_SPACES == q->front;
 }
 
+int getQueueSize(Queue* q) {
+    // If the queue is empty, return 0
+    if (q->front == -1) return 0;
+    // If the front is behind the rear, return the difference
+    if (q->front <= q->rear) return q->rear - q->front + 1;
+    // If the front is ahead of the rear, return the difference plus the size of the queue
+    return SOLUTION_SPACES - q->front + q->rear + 1;
+} 
+
 // Function to check if the queue is empty
 bool isEmpty(Queue* q) {
     return q->front == -1;
@@ -430,6 +461,17 @@ void enqueue(Queue *q, BCB *block) {
     q->rear = (q->rear + 1) % SOLUTION_SPACES;
     q->items[q->rear] = *block;
     //printf("Element %lld inserted\n", value);
+}
+
+BCB peek(Queue* q) {
+    // If the queue is empty, print an error message and
+    // return -1
+    if (isEmpty(q)) {
+        printf("Queue underflow\n");
+        exit(-1);
+    }
+    // Return the front element
+    return q->items[q->front];
 }
 
 BCB dequeue(Queue* q) {
@@ -1563,6 +1605,160 @@ void solution5_init_solution_space(BCB* block, int solution_space_id) {
     }
 }
 
+void solution5_ask_for_other_solution_space(Queue *solution_queue, int *solution_managers) {
+    
+    is_my_solution_spaces_ended = true;
+
+    // TODO: take work from other processes
+    int i, target_process = -1;
+    BCB new_block;
+    
+    new_block.solution = malloc(board.rows_count * board.cols_count * sizeof(CellState));
+    new_block.solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool));
+    
+    // send SEND_STATUS message to all other processes
+    bool messages_sent_to_processes[size];
+    for (i = 0; i < SOLUTION_SPACES; i++) {
+        target_process = solution_managers[i];
+        if (target_process != rank && !messages_sent_to_processes[target_process]) {
+            MPI_Isend(NULL, 0, MPI_INT, target_process, SEND_STATUS, MPI_COMM_WORLD, &message_request);
+            messages_sent_to_processes[target_process] = true;
+        }
+    }
+    
+    // receive status from other processes
+    StatusMessage status_message[size];
+    for (i = 0; i < SOLUTION_SPACES; i++) {
+        target_process = solution_managers[i];
+        if (target_process != rank && messages_sent_to_processes[target_process])
+            MPI_Recv(&status_message[i], 1, MPI_StatusMessage, target_process, SEND_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+
+    // choose the process with the lowest queue_size
+    int min_queue_size = size + 1;
+    target_process = -1;
+    for (i = 0; i < SOLUTION_SPACES; i++) {
+        target_process = solution_managers[i];
+        if (target_process == rank && !messages_sent_to_processes[target_process]) continue;
+        if (status_message[target_process].queue_size < min_queue_size) {
+            min_queue_size = status_message[target_process].queue_size;
+            target_process = target_process;
+        }
+    }
+
+    if (min_queue_size == 1) {
+        // choose the process with the lowest processes_per_solution_space
+        int min_processes_per_solution_space = size + 1;
+        for (i = 0; i < size; i++) {
+            if (i == rank || status_message[i].queue_size > 1) continue;
+            if (status_message[i].processes_per_solution_space < min_processes_per_solution_space) {
+                min_processes_per_solution_space = status_message[i].processes_per_solution_space;
+                target_process = i;
+            }
+        }
+        // send a message to the target process to get a solution space
+        MPI_Send(NULL, 0, MPI_INT, target_process, SEND_JOB, MPI_COMM_WORLD);
+        
+        // receive shared solution space from target process
+        int buffer[size * size * 2 + 1];
+        MPI_Recv(buffer, size * size * 2 + 1, MPI_INT, target_process, SHARE_SOLUTION_SPACE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        if (buffer[0] == UNKNOWN) {
+            return solution5_ask_for_other_solution_space(solution_queue, solution_managers);
+        }
+        memcpy(new_block.solution, buffer, board.rows_count * board.cols_count * sizeof(CellState));
+        for (i = 0; i < board.rows_count * board.cols_count; i++) {
+            new_block.solution_space_unknowns[i] = buffer[board.rows_count * board.cols_count + i] == 1;
+        }
+        shared_solution_space_order = buffer[size * size * 2];
+        count_processes_sharing_solution_space = min_processes_per_solution_space + 1;
+
+    } else {
+        // send a message to the target process to get a solution space
+        MPI_Send(NULL, 0, MPI_INT, target_process, SEND_JOB, MPI_COMM_WORLD);
+
+        // receive block from target process
+        int buffer[size * size * 2];
+        MPI_Recv(&new_block, size * size * 2, MPI_INT, target_process, SEND_JOB, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        // Decode sent buffer with solution and solution_space_unknowns
+        memcpy(new_block.solution, buffer, board.rows_count * board.cols_count * sizeof(CellState));
+        for (i = 0; i < board.rows_count * board.cols_count; i++) {
+            new_block.solution_space_unknowns[i] = buffer[board.rows_count * board.cols_count + i] == 1;
+        }
+    }
+    enqueue(solution_queue, &new_block);
+}
+
+void solution5_check_for_messages(Queue *solution_queue) {
+ 
+    int message_received = 0;
+    
+    MPI_Status status;
+    MPI_Test(&message_request, &message_received, &status);
+
+    if (message_received) {
+
+        if (status.MPI_TAG == TERMINATE) {
+            printf("Process %d received termination signal\n", rank);
+            // empty queue
+            initializeQueue(solution_queue);
+        } else if (status.MPI_TAG == SEND_STATUS && process_asking_status == -1) {  // TODO: what if SEND_STATUS is again from the same process? possible?
+            // send status message to the source process
+            StatusMessage status_message;
+            status_message.queue_size = getQueueSize(solution_queue);
+            status_message.processes_per_solution_space = count_processes_sharing_solution_space;
+            if (is_my_solution_spaces_ended)
+                status_message.queue_size = size + 1;
+            MPI_Isend(&status_message, 1, MPI_StatusMessage, status.MPI_SOURCE, SEND_STATUS, MPI_COMM_WORLD, &message_request);
+            process_asking_status = status.MPI_SOURCE;
+
+        } else if (status.MPI_TAG == FREE_STATUS && process_asking_status == status.MPI_SOURCE) {
+            process_asking_status = -1;
+        } else if (status.MPI_TAG == SEND_JOB && process_asking_status == status.MPI_SOURCE) {
+            // send block to the source process
+            int queue_size = getQueueSize(solution_queue);
+            int i;
+            BCB block_to_send;
+            if (queue_size == 1) {
+
+                block_to_send = peek(solution_queue);
+
+                processes_sharing_solution_space[count_processes_sharing_solution_space++] = status.MPI_SOURCE;
+
+                // send SHARE_SOLUTION_SPACE message to all other processes in processes_sharing_solution_space
+                
+                int buffer[size * size * 2 + 1];
+                memcpy(buffer, block_to_send.solution, board.rows_count * board.cols_count * sizeof(CellState));
+                if (is_my_solution_spaces_ended)
+                    buffer[0] = UNKNOWN;
+                for (i = 0; i < board.rows_count * board.cols_count; i++) {
+                    buffer[board.rows_count * board.cols_count + i] = block_to_send.solution_space_unknowns[i] ? 1 : 0;
+                }
+
+                int target_process;
+                for (i = 0; i < size; i++) {
+                    target_process = processes_sharing_solution_space[i];
+                    if (target_process >= 0) {
+                        buffer[size * size * 2] = i + 1;
+                        MPI_Isend(buffer, size * size * 2 + 1, MPI_INT, target_process, SHARE_SOLUTION_SPACE, MPI_COMM_WORLD, &message_request);
+                    }
+                }
+                shared_solution_space_order = 0;
+
+            } else if (queue_size > 1) {
+                int buffer[size * size * 2];
+                block_to_send = dequeue(solution_queue);
+                memcpy(buffer, block_to_send.solution, board.rows_count * board.cols_count * sizeof(CellState));
+                for (i = 0; i < board.rows_count * board.cols_count; i++) {
+                    buffer[board.rows_count * board.cols_count + i] = block_to_send.solution_space_unknowns[i] ? 1 : 0;
+                }
+                MPI_Isend(buffer, size * size * 2, MPI_INT, status.MPI_SOURCE, SEND_JOB, MPI_COMM_WORLD, &message_request);
+            }
+            process_asking_status = -1;
+        }
+    }
+}
+
 void compute_unknowns(Board board, int **unknown_index, int **unknown_index_length) {
     int i, j, temp_index = 0, total = 0;
     *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
@@ -1587,6 +1783,388 @@ void compute_unknowns(Board board, int **unknown_index, int **unknown_index_leng
 }
 
 /* ------------------ MAIN ------------------ */
+
+void solution1(Board final_solution) {
+    int i, j, temp_index = 0;
+    int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
+    if (rank == 0) {
+        // Initialize the unknown index matrix with the indexes of the unknown cells to better scan them
+        for (i = 0; i < board.rows_count; i++) {
+            temp_index = 0;
+            for (j = 0; j < board.cols_count; j++) {
+                int cell_index = i * board.cols_count + j;
+                if (final_solution.solution[cell_index] == UNKNOWN){
+                    unknown_index[i * board.cols_count + temp_index] = j;
+                    temp_index++;
+                }
+            }
+            unknown_index_length[i] = temp_index;
+            if (temp_index < board.cols_count)
+                unknown_index[i * board.cols_count + temp_index] = -1;
+        }
+
+        //print_vector(unknown_index, board.rows_count * board.cols_count);
+        //print_vector(unknown_index_length, board.rows_count);
+    }
+
+    MPI_Bcast(unknown_index, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(unknown_index_length, board.rows_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Create initial starting solution depending on the rank of the process
+    // In this way, we define a sort of solution space for each process to analyse
+    int uk_idx, cell_choice, temp_rank = rank;
+    for (i = 0; i < board.rows_count; i++) {
+        for (j = 0; j < board.cols_count; j++) {
+            if (unknown_index[i * board.rows_count + j] == -1)
+                break;
+            uk_idx = unknown_index[i * board.rows_count + j];
+            cell_choice = temp_rank % 2;
+
+            //if (rank == 2) printf("[Cell choice] Rank %d: i=%d, j=%d, uk_idx=%d, cell_choice=%d\n", rank, i, j, uk_idx, cell_choice);
+
+            // Validate if cell_choice (black or white) here is valid
+            //      If not valid, use fixed choice and do not decrease temp_rank
+            //      If neither are valid, set to white (then the loop will change it)
+            if (!single_is_cell_state_valid(final_solution, i, uk_idx, cell_choice)) {
+                cell_choice = abs(cell_choice - 1);
+                if (!single_is_cell_state_valid(final_solution, i, uk_idx, cell_choice)) {
+                    cell_choice = UNKNOWN;
+                    continue;
+                }
+            }
+
+            //if (rank == 2) printf("[Updated] Rank %d: i=%d, j=%d, uk_idx=%d, cell_choice=%d\n", rank, i, j, uk_idx, cell_choice);
+
+            final_solution.solution[i * board.cols_count + uk_idx] = cell_choice;
+            final_solution = single_set_white_and_black_cells(final_solution, i, uk_idx, cell_choice, NULL, NULL);
+            //unknown_index[i * board.cols_count + j] = -2;  // ??
+            // set white and black cells (localised single process, no need to check all the matrix)
+            //      remember to update unknown_index (maybe add -2 as a value to ignore)
+
+            //if (rank == 2) print_board("[After coloring]", final_solution, SOLUTION);
+
+            if (temp_rank > 0)
+                temp_rank = temp_rank / 2;
+            
+            if (temp_rank == 0)
+                break;
+        }
+
+        if (temp_rank == 0)
+            break;
+    }
+
+    //print_board("Pruned sad", final_solution, SOLUTION);
+    // Loop
+    // recursive function iterating unknown_index
+    single_recursive_set_cell(final_solution, unknown_index, unknown_index_length, 0, 0);
+}
+
+void solution2(Board board) {
+    int i, j, temp_index = 0;
+    int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
+    if (rank == 0) {
+        // Initialize the unknown index matrix with the indexes of the unknown cells to better scan them
+        for (i = 0; i < board.rows_count; i++) {
+            temp_index = 0;
+            for (j = 0; j < board.cols_count; j++) {
+                int cell_index = i * board.cols_count + j;
+                if (board.solution[cell_index] == UNKNOWN){
+                    unknown_index[i * board.cols_count + temp_index] = j;
+                    temp_index++;
+                }
+            }
+            unknown_index_length[i] = temp_index;
+            if (temp_index < board.cols_count)
+                unknown_index[i * board.cols_count + temp_index] = -1;
+        }
+
+        //print_vector(unknown_index, board.rows_count * board.cols_count);
+        //print_vector(unknown_index_length, board.rows_count);
+    }
+
+    MPI_Bcast(unknown_index, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(unknown_index_length, board.rows_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // first row of matrix has 2 cells with value=1
+    // if cpn of row 0 of value 2 is 1, then the first cell with value=1 from the left is white
+    // if cpn of row 0 of value 2 is 2, then the second cell with value=1 from the left is white
+    // if cpn of row 0 of value 2 is 3 (ncpn+1), then all cells with value=1 are black
+    int *combinations_per_number = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    int *n_combinations_per_number = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+
+    memset(combinations_per_number, 0, board.rows_count * board.cols_count * sizeof(int));
+    memset(n_combinations_per_number, 0, board.rows_count * board.cols_count * sizeof(int));
+
+    int value, total_combinations = 1;
+    for (i = 0; i < board.rows_count; i++) {
+        for (j = 0; j < unknown_index_length[i]; j++) {
+            value = board.grid[i * board.cols_count + unknown_index[i * board.cols_count + j]];
+            combinations_per_number[i * board.cols_count + value - 1] = 1;
+            n_combinations_per_number[i * board.cols_count + value - 1]++;
+        }
+    }
+    // print numbers of combinations per number
+    if(rank == 0) {
+        for (i = 0; i < board.rows_count; i++) {
+            for (j = 0; j < board.rows_count; j++) {
+                printf("%d ", n_combinations_per_number[i * board.cols_count + j]);
+            }
+            printf("\n");
+        }
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    sleep(1);
+    
+    for (i = 0; i < board.rows_count * board.cols_count; i++) {
+        if (n_combinations_per_number[i] == 0) continue;
+        total_combinations *= n_combinations_per_number[i] + 1;
+    }
+
+    MPI_Bcast(combinations_per_number, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(n_combinations_per_number, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (rank == 2) printf("Total combinations: %d\n", total_combinations);
+
+    int stopping_flag = 0;
+    int cycles_count = 0;
+    
+    for (i = 1; i <= total_combinations; i += size) {
+
+        if (cycles_count % 50 == 0) {
+            MPI_Test(&message_request, &stopping_flag, MPI_STATUS_IGNORE);
+
+            if (stopping_flag) break;
+        }
+
+        bool is_valid = solution2_update_combinations(&board, combinations_per_number, n_combinations_per_number, unknown_index, unknown_index_length, i, rank);
+        
+        if (!is_valid) continue;
+
+        /*if (rank == 0 && DEBUG) {
+            char formatted_string[MAX_BUFFER_SIZE];
+            snprintf(formatted_string, MAX_BUFFER_SIZE, "\n[%d] Solution %d", rank, i);
+            print_board(formatted_string, board, SOLUTION);
+        }*/
+
+        if (check_hitori_conditions(board)) {
+            char formatted_string[MAX_BUFFER_SIZE];
+            snprintf(formatted_string, MAX_BUFFER_SIZE, "\n[%d] Solution found .)", rank);
+            print_board(formatted_string, board, SOLUTION);
+
+            for (i = 0; i < size; i++) {
+                if (i != rank) {
+                    MPI_Send(&rank, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+                    if (DEBUG) printf("Sending termination signal from %d to %d\n", rank, i);
+                }
+            }
+            solver_process = rank;
+
+            break;
+        }
+
+        cycles_count++;
+    }
+    
+    //MPI_Barrier(MPI_COMM_WORLD);
+
+    /* MPI_Finalize();
+
+    exit(0);*/
+}
+
+void solution3(Board final_solution) {
+    
+    int i, j, temp_index = 0;
+    int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
+    if (rank == 0) {
+        // Initialize the unknown index matrix with the indexes of the unknown cells to better scan them
+        for (i = 0; i < board.rows_count; i++) {
+            temp_index = 0;
+            for (j = 0; j < board.cols_count; j++) {
+                int cell_index = i * board.cols_count + j;
+                if (final_solution.solution[cell_index] == UNKNOWN){
+                    unknown_index[i * board.cols_count + temp_index] = j;
+                    temp_index++;
+                }
+            }
+            unknown_index_length[i] = temp_index;
+            if (temp_index < board.cols_count)
+                unknown_index[i * board.cols_count + temp_index] = -1;
+        }
+
+        //print_vector(unknown_index, board.rows_count * board.cols_count);
+        //print_vector(unknown_index_length, board.rows_count);
+    }
+
+    MPI_Bcast(unknown_index, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(unknown_index_length, board.rows_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+    //print_board("Pruned sad", final_solution, SOLUTION);
+    // Loop
+    // recursive function iterating unknown_index
+    int solutions_to_skip = rank;
+    solution3_recursive_set_cell(&final_solution, unknown_index, unknown_index_length, 0, 0, &solutions_to_skip);
+}
+
+/* void solution4(Board board) {
+    
+
+    // ======================================= UNKNOWN INDEX ======================================= //
+
+    int i, j, temp_index = 0;
+    int *unknown_index = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    int *unknown_index_length = (int *) malloc(board.rows_count * sizeof(int));
+    if (rank == 0) {
+        // Initialize the unknown index matrix with the indexes of the unknown cells to better scan them
+        for (i = 0; i < board.rows_count; i++) {
+            temp_index = 0;
+            for (j = 0; j < board.cols_count; j++) {
+                int cell_index = i * board.cols_count + j;
+                if (board.solution[cell_index] == UNKNOWN){
+                    unknown_index[i * board.cols_count + temp_index] = j;
+                    temp_index++;
+                }
+            }
+            unknown_index_length[i] = temp_index;
+            if (temp_index < board.cols_count)
+                unknown_index[i * board.cols_count + temp_index] = -1;
+        }
+    }
+
+    MPI_Bcast(unknown_index, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(unknown_index_length, board.rows_count, MPI_INT, 0, MPI_COMM_WORLD);
+
+
+    // ======================================= COMBINATIONS COUNT ======================================= //
+    
+
+    __int128_t total_combinations;
+
+    int unknown_count = 0;
+    for (i = 0; i < board.rows_count; i++)
+        unknown_count += unknown_index_length[i];
+     
+    if (unknown_count > 127) {
+        printf("Too many unknown cells\n");
+        return;
+    }
+    total_combinations = pow(2, unknown_count);
+
+    // print __int128_t
+    
+    printf("Total combinations: %lld\n", total_combinations);
+
+
+
+    // ======================================= SOLUTION 4 ======================================= //
+
+
+    __int128_t solution_space_size = total_combinations / SOLUTION_SPACES;
+    __int128_t start_solution = rank;
+    __int128_t solution_rest = 0;
+    //__int128_t end_solution = (rank + 1) * solution_space_size;
+
+    // TODO: manage when processors different then SOLUTION SPACES
+
+    int count = 0;
+    int temp_space_manager[SOLUTION_SPACES];
+    memset(temp_space_manager, -1, SOLUTION_SPACES * sizeof(int));
+    for (j = rank; j < SOLUTION_SPACES; j += size)
+        temp_space_manager[count++] = j;
+
+    int solution_space_manager[size][SOLUTION_SPACES];
+    MPI_Allgather(temp_space_manager, SOLUTION_SPACES, MPI_INT, solution_space_manager, SOLUTION_SPACES, MPI_INT, MPI_COMM_WORLD);
+
+    if (rank == 2) {
+        for (i = 0; i < size; i++) {
+            printf("Processor %d:\n", i);
+            for (j = 0; j < SOLUTION_SPACES; j++) {
+                printf("    %d: %d\n", j, solution_space_manager[i][j]);
+            }
+        }   
+        printf("\n");
+    }
+
+    bool leaf_found = false;
+
+    for (i = 0; i < SOLUTION_SPACES; i++) {
+        if (solution_space_manager[rank][i] == -1) break;
+        if (solution_space_manager[rank][i] == rank) {
+            leaf_found = solution4_build_leaf(&board, unknown_index, unknown_index_length, 0, 0, 0, &start_solution, &solution_rest);
+
+            // printf("[%d] First leaf found: %d\n", rank, leaf_found);
+            
+            if (check_hitori_conditions(board)) {
+                printf("[%d] Solution found\n", rank);
+                print_board("Solution", board, SOLUTION);
+                return;
+            }
+
+            if (leaf_found) {
+                enqueue(&solution_queue, start_solution);
+            }
+        }
+    }
+
+    if (rank == 2) print_board("First", board, SOLUTION);
+
+    int stopping_flag = 0;
+    if (true) {
+
+        while(!isEmpty(&solution_queue)) {
+
+            MPI_Test(&message_request, &stopping_flag, MPI_STATUS_IGNORE);
+            
+            if (stopping_flag) {
+                if (DEBUG) printf("Process %d received termination signal\n", rank);
+                break;
+            }
+
+            // if (rank == 2) printQueue(&solution_queue);
+
+            __int128_t current_solution = dequeue(&solution_queue);
+            __int128_t current_rest = 0;
+
+            // if (rank == 2) printQueue(&solution_queue);
+
+            leaf_found = solution4_next_leaf(&board, unknown_index, unknown_index_length, &current_solution, &current_rest);
+
+            // if (rank == 2) printf("[%d] Leaf found: %d\n", rank, leaf_found);
+
+            // TODO: add check for reaching solution space end
+            if (leaf_found) {
+                // if (rank == 2) print_board("Testing solution", board, SOLUTION);
+                if (check_hitori_conditions(board)) {
+                    printf("[%d] Solution found\n", rank);
+                    print_board("Solution", board, SOLUTION);
+
+                    for (i = 0; i < size; i++) {
+                        if (i != rank) {
+                            MPI_Send(&rank, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+                            if (DEBUG) printf("Sending termination signal from %d to %d\n", rank, i);
+                        }
+                    }
+
+                    return;
+                } else {
+                    enqueue(&solution_queue, current_solution);
+                }
+
+            } else {
+                // TODO: if no leaf found, ask other processes for their solution spaces
+            }
+        }
+    }
+    
+    printf("Processor %d is finished\n", rank);
+    
+    // TODO: take work from other processes
+} */
 
 bool solution5() {
 
@@ -1651,15 +2229,7 @@ bool solution5() {
 
     // if (rank == 2) print_board("First", board, SOLUTION);
 
-    int stopping_flag = 0;
     while(!isEmpty(&solution_queue)) {
-
-        MPI_Test(&stopping_request, &stopping_flag, MPI_STATUS_IGNORE);
-        
-        if (stopping_flag) {
-            printf("Process %d received termination signal\n", rank);
-            break;
-        }
 
         // if (rank == 2) printQueue(&solution_queue);
 
@@ -1680,13 +2250,13 @@ bool solution5() {
             } else {
                 enqueue(&solution_queue, &current_solution);
             }
-
-        } else {
-            // TODO: if no leaf found, ask other processes for their solution spaces
         }
-    }
-    
-    // TODO: take work from other processes
+        
+        if (isEmpty(&solution_queue))
+            solution5_ask_for_other_solution_space(&solution_queue, solution_space_manager);
+        else
+            solution5_check_for_messages(&solution_queue);
+    }   
 
     return false;
 }
@@ -1705,6 +2275,13 @@ int main(int argc, char** argv) {
     initializeQueue(&solution_queue);
 
     /*
+        Allocate the processes_sharing_solution_space array
+    */
+
+    processes_sharing_solution_space = (int *) malloc(size * sizeof(int));
+    memset(processes_sharing_solution_space, -1, size * sizeof(int));
+
+    /*
         Read the board from the input file
     */
 
@@ -1718,7 +2295,18 @@ int main(int argc, char** argv) {
         ALTERNATIVE: use MPI_Datatype to create a custom datatype for the board (necessitate the struct to have non-dynamic arrays)
     */
     
-    mpi_share_board(board, &board);
+    // mpi_share_board(board, &board);
+
+    MPI_Bcast(&board.rows_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&board.cols_count, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    
+    if (rank != 0) {
+        board.grid = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+        board.solution = (CellState *) malloc(board.rows_count * board.cols_count * sizeof(CellState));
+    }
+
+    MPI_Bcast(board.grid, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(board.solution, board.rows_count * board.cols_count, MPI_INT, 0, MPI_COMM_WORLD);
 
     /*
         Apply the basic hitori pruning techniques to the board.
@@ -1771,7 +2359,7 @@ int main(int argc, char** argv) {
         For each process, initialize a background task that waits for a termination signal
     */
     
-    MPI_Irecv(&solver_process, 1, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &stopping_request);
+    MPI_Irecv(&solver_process, 1, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &message_request);
 
     /*
         Apply the recursive backtracking algorithm to find the solution
