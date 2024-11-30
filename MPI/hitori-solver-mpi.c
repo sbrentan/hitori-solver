@@ -8,7 +8,7 @@
 
 #define MAX_BUFFER_SIZE 2048
 #define DEBUG false
-#define SOLUTION_SPACES 8
+#define SOLUTION_SPACES 4
 
 typedef enum CellState {
     UNKNOWN = -1,
@@ -62,9 +62,12 @@ typedef struct {
 typedef enum Message {
     TERMINATE = 1,
     SEND_JOB = 2,
-    SEND_STATUS = 3,
-    SHARE_SOLUTION_SPACE = 4,
-    FREE_STATUS = 5
+    RECEIVE_JOB = 3,
+    SEND_STATUS = 4,
+    RECEIVE_STATUS = 5,
+    FREE_STATUS = 6,
+    SHARE_SOLUTION_SPACE = 7,
+    PROCESS_FINISHED = 8
 } Message;
 
 typedef struct StatusMessage {
@@ -76,16 +79,19 @@ int rank, size, solver_process = -1;
 double ctime = 0;
 Board board;
 Queue solution_queue;
-MPI_Request message_request;
 int *unknown_index, *unknown_index_length;
-MPI_Datatype MPI_StatusMessage;
 
-// TODO: comment these functions
-int process_asking_status = -1;
-int count_processes_sharing_solution_space = 1;
-int *processes_sharing_solution_space;
+MPI_Datatype MPI_StatusMessage;
+MPI_Request dummy_request, send_status_request, receive_status_request, send_job_request, receive_job_request, free_status_request, share_solution_request, stopping_request;
+
+int process_asking_status = -1; // for space solution managers, to know the process asking for status
+int count_processes_sharing_solution_space = 0; // Number of processes sharing the solution space (used by managers)
+int *processes_sharing_solution_space; // List of processes sharing the solution space (used by managers)
 int shared_solution_space_order = 0;  // Indicates the number of solutions to skip when working on a shared solution space
-bool is_my_solution_spaces_ended = false;
+bool is_my_solution_spaces_ended = false;  // Indicates if the process has finished working on its solution spaces and has asked for others
+int* share_solution_buffer;
+bool is_manager = false;
+bool received_termination_signal = false;
 
 /* ------------------ GENERAL HELPERS ------------------ */
 
@@ -95,7 +101,7 @@ void read_board(int **board, int *rows_count, int *cols_count, CellState **solut
         Helper function to read the board from the input file.
     */
     
-    FILE *fp = fopen("../test-cases/inputs/input-20x20.txt", "r");
+    FILE *fp = fopen("../test-cases/inputs/input-15x15.txt", "r");
     
     if (fp == NULL) {
         printf("Could not open file.\n");
@@ -131,14 +137,6 @@ void read_board(int **board, int *rows_count, int *cols_count, CellState **solut
 
     *board = (int *) malloc(rows * cols * sizeof(int));
     *solution = (int *) malloc(rows * cols * sizeof(CellState));
-    
-    int i, j;
-    for (i = 0; i < rows; i++) {
-        for (j = 0; j < cols; j++) {
-            printf("i: %d, j: %d\n", i, j);
-            break;
-        }
-    }
 
     rewind(fp);
 
@@ -1477,8 +1475,19 @@ bool build_leaf(BCB* block, int uk_x, int uk_y) {
         uk_y = 0;
     }
 
-    if (uk_x == board.rows_count)
+    if (uk_x == board.rows_count) {
+        if (count_processes_sharing_solution_space > 0) {
+            shared_solution_space_order -= 1;
+            if (shared_solution_space_order == -1) 
+                shared_solution_space_order = count_processes_sharing_solution_space;
+            else {
+                printf("[Build leaf][%d] Skipping shared solution space\n", rank);
+                return false;
+            }
+            printf("[Build leaf][%d] Testing shared solution space\n", rank);
+        }
         return true;
+    }
 
     
     board_y_index = unknown_index[uk_x * board.cols_count + uk_y];
@@ -1542,7 +1551,8 @@ bool next_leaf(BCB *block) {
                 printf("\n\n\n\n\n\n\nCell is unknown\n");
                 print_block("Block", block);
                 printf("Unknown index: %d %d\n\n\n\n\n\n", i, board_y_index);
-                exit(-1);
+                // exit(-1);
+                return false;
             }
 
             if (cell_state == WHITE) {
@@ -1568,7 +1578,7 @@ void init_solution_space(BCB* block, int solution_space_id) {
     memset(block->solution_space_unknowns, false, board.rows_count * board.cols_count * sizeof(bool));
 
     int i, j;
-    int uk_idx, cell_choice, temp_solution_space_id = size - 1;
+    int uk_idx, cell_choice, temp_solution_space_id = SOLUTION_SPACES - 1;
     for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
             if (unknown_index[i * board.rows_count + j] == -1)
@@ -1605,156 +1615,329 @@ void init_solution_space(BCB* block, int solution_space_id) {
     }
 }
 
+void block_to_buffer(BCB* block, int **buffer) {
+    int i;
+    printf("a\n");
+    *buffer = (int *) malloc((size * size * 2 + 1) * sizeof(int));
+    printf("a1\n");
+    memcpy(*buffer, block->solution, board.rows_count * board.cols_count * sizeof(CellState));
+    printf("b\n");
+    if (*buffer[0] == UNKNOWN)
+        printf("[ERROR] Process %d buffer 0 is already unknown\n", rank);
+    if (is_my_solution_spaces_ended) {
+        // TODO: write better?
+        *buffer[0] = UNKNOWN;
+        printf("[ERROR] Process %d buffer 0 is set to unknown\n", rank);
+    }
+    printf("c\n");
+    for (i = 0; i < board.rows_count * board.cols_count; i++)
+        (*buffer)[board.rows_count * board.cols_count + i] = block->solution_space_unknowns[i] ? 1 : 0;
+    printf("d\n");
+    (*buffer)[size * size * 2] = 0;
+    printf("e\n");
+}
+
+void free_request(MPI_Request *request) {
+    if (request != NULL) {
+        // MPI_Request_free(request);
+        request = NULL;
+    }
+}
+
+bool buffer_to_block(int *buffer, BCB *block) {
+
+    int i;
+    block->solution = malloc(board.rows_count * board.cols_count * sizeof(CellState));
+    block->solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool));
+    
+    if (buffer[0] == UNKNOWN) {
+        printf("[ERROR] Process %d received unknown buffer\n", rank);
+        return false;
+    }
+    
+    memcpy(block->solution, buffer, board.rows_count * board.cols_count * sizeof(CellState));
+    for (i = 0; i < board.rows_count * board.cols_count; i++) {
+        block->solution_space_unknowns[i] = buffer[board.rows_count * board.cols_count + i] == 1;
+    }
+
+    return true;
+}
+
 void ask_for_other_solution_space(Queue *solution_queue, int *solution_managers) {
     
-    is_my_solution_spaces_ended = true;
+    printf("[Ask for other solution space] Process %d\n", rank);
 
-    // TODO: take work from other processes
-    int i, target_process = -1;
+    is_my_solution_spaces_ended = true;
+    count_processes_sharing_solution_space = 0;
+    shared_solution_space_order = 0;
+    processes_sharing_solution_space = (int *) malloc(size * sizeof(int));
+    // free_request(&send_status_request);
+
+    int i, target_process = -1, received = 0, stopping = 0;
     BCB new_block;
     
     new_block.solution = malloc(board.rows_count * board.cols_count * sizeof(CellState));
     new_block.solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool));
     
     // send SEND_STATUS message to all other processes
+    printf("[Ask for other solution space] %d Sending status to all other processes\n", rank);
     bool messages_sent_to_processes[size];
     for (i = 0; i < SOLUTION_SPACES; i++) {
         target_process = solution_managers[i];
         if (target_process != rank && !messages_sent_to_processes[target_process]) {
-            MPI_Isend(NULL, 0, MPI_INT, target_process, SEND_STATUS, MPI_COMM_WORLD, &message_request);
+            MPI_Isend(NULL, 0, MPI_INT, target_process, SEND_STATUS, MPI_COMM_WORLD, &dummy_request);
             messages_sent_to_processes[target_process] = true;
         }
     }
     
     // receive status from other processes
+    printf("[Ask for other solution space] %d Receiving status from other processes\n", rank);
     StatusMessage status_message[size];
     for (i = 0; i < SOLUTION_SPACES; i++) {
         target_process = solution_managers[i];
-        if (target_process != rank && messages_sent_to_processes[target_process])
-            MPI_Recv(&status_message[i], 1, MPI_StatusMessage, target_process, SEND_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        if (target_process != rank && messages_sent_to_processes[target_process]) {
+            
+            MPI_Irecv(&status_message[i], 1, MPI_StatusMessage, target_process, RECEIVE_STATUS, MPI_COMM_WORLD, &receive_status_request);
+            while (true) {
+                MPI_Test(&receive_status_request, &received, MPI_STATUS_IGNORE);
+                if (received) break;
+                MPI_Test(&stopping_request, &stopping, MPI_STATUS_IGNORE);
+                if (stopping) return;
+            }
+        }
     }
 
     // choose the process with the lowest queue_size
     int min_queue_size = size + 1;
-    target_process = -1;
+    int chosen_process = -1;
     for (i = 0; i < SOLUTION_SPACES; i++) {
         target_process = solution_managers[i];
-        if (target_process == rank && !messages_sent_to_processes[target_process]) continue;
-        if (status_message[target_process].queue_size < min_queue_size) {
+        if (target_process == rank || !messages_sent_to_processes[target_process]) continue;
+        if (status_message[target_process].queue_size < min_queue_size && status_message[target_process].queue_size > 0) {
             min_queue_size = status_message[target_process].queue_size;
-            target_process = target_process;
+            chosen_process = target_process;
         }
+        printf("[Ask for other solution space] %d Process %d queue size: %d %d\n", rank, target_process, status_message[target_process].queue_size, status_message[target_process].processes_per_solution_space);
     }
+    if (chosen_process == -1 || min_queue_size == size + 1) return;
 
+    int buffer[size * size * 2 + 1];
+    int min_processes_per_solution_space = size + 1;
     if (min_queue_size == 1) {
         // choose the process with the lowest processes_per_solution_space
-        int min_processes_per_solution_space = size + 1;
-        for (i = 0; i < size; i++) {
-            if (i == rank || status_message[i].queue_size > 1) continue;
-            if (status_message[i].processes_per_solution_space < min_processes_per_solution_space) {
-                min_processes_per_solution_space = status_message[i].processes_per_solution_space;
-                target_process = i;
+        for (i = 0; i < SOLUTION_SPACES; i++) {
+            target_process = solution_managers[i];
+            if (target_process == rank|| !messages_sent_to_processes[target_process] || status_message[target_process].queue_size > 1) continue;
+            if (status_message[target_process].processes_per_solution_space < min_processes_per_solution_space) {
+                min_processes_per_solution_space = status_message[target_process].processes_per_solution_space;
+                chosen_process = target_process;
             }
         }
-        // send a message to the target process to get a solution space
-        MPI_Send(NULL, 0, MPI_INT, target_process, SEND_JOB, MPI_COMM_WORLD);
-        
-        // receive shared solution space from target process
-        int buffer[size * size * 2 + 1];
-        MPI_Recv(buffer, size * size * 2 + 1, MPI_INT, target_process, SHARE_SOLUTION_SPACE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        if (buffer[0] == UNKNOWN) {
-            return ask_for_other_solution_space(solution_queue, solution_managers);
-        }
-        memcpy(new_block.solution, buffer, board.rows_count * board.cols_count * sizeof(CellState));
-        for (i = 0; i < board.rows_count * board.cols_count; i++) {
-            new_block.solution_space_unknowns[i] = buffer[board.rows_count * board.cols_count + i] == 1;
-        }
-        shared_solution_space_order = buffer[size * size * 2];
-        count_processes_sharing_solution_space = min_processes_per_solution_space + 1;
+    }
 
-    } else {
-        // send a message to the target process to get a solution space
-        MPI_Send(NULL, 0, MPI_INT, target_process, SEND_JOB, MPI_COMM_WORLD);
+    printf("[Ask for other solution space] %d Chosen process: %d\n", rank, chosen_process);
 
-        // receive block from target process
-        int buffer[size * size * 2];
-        MPI_Recv(&new_block, size * size * 2, MPI_INT, target_process, SEND_JOB, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        // Decode sent buffer with solution and solution_space_unknowns
-        memcpy(new_block.solution, buffer, board.rows_count * board.cols_count * sizeof(CellState));
-        for (i = 0; i < board.rows_count * board.cols_count; i++) {
-            new_block.solution_space_unknowns[i] = buffer[board.rows_count * board.cols_count + i] == 1;
+    // send a message to the chosen process to get a solution space
+    MPI_Isend(NULL, 0, MPI_INT, chosen_process, SEND_JOB, MPI_COMM_WORLD, &dummy_request);
+    
+    for (i = 0; i < SOLUTION_SPACES; i++) {
+        target_process = solution_managers[i];
+        if (target_process != chosen_process && messages_sent_to_processes[target_process]) {
+            MPI_Isend(NULL, 0, MPI_INT, target_process, FREE_STATUS, MPI_COMM_WORLD, &dummy_request);
         }
     }
+
+    // receive block from chosen process
+    if (min_queue_size == 1)
+        MPI_Irecv(buffer, size * size * 2 + 1, MPI_INT, chosen_process, SHARE_SOLUTION_SPACE, MPI_COMM_WORLD, &receive_job_request);
+    else
+        MPI_Irecv(buffer, size * size * 2 + 1, MPI_INT, chosen_process, RECEIVE_JOB, MPI_COMM_WORLD, &receive_job_request);
+
+    printf("[Ask for other solution space] %d Waiting for block from process %d\n", rank, chosen_process);
+
+    MPI_Status status;
+    while (true) {
+        MPI_Test(&receive_job_request, &received, &status);
+        if (received) break;
+        MPI_Test(&stopping_request, &stopping, &status);
+        if (stopping) return;
+    }
+
+    printf("[Ask for other solution space] %d Received block from process %d\n", rank, chosen_process);
+
+    if (!buffer_to_block(buffer, &new_block))
+        return ask_for_other_solution_space(solution_queue, solution_managers);
+
+    if (min_queue_size == 1) {
+        shared_solution_space_order = buffer[size * size * 2];
+        count_processes_sharing_solution_space = min_processes_per_solution_space + 1;
+        printf("[Ask for other solution space] %d Sharing solution space %d %d\n", rank, shared_solution_space_order, count_processes_sharing_solution_space);
+    }
+
+    printf("[Ask for other solution space] %d Enqueueing block\n", rank);
+    
     enqueue(solution_queue, &new_block);
 }
 
 void check_for_messages(Queue *solution_queue) {
  
-    int message_received = 0;
-    
+    int i, message_received = 0;
     MPI_Status status;
-    MPI_Test(&message_request, &message_received, &status);
-
-    if (message_received) {
-
-        if (status.MPI_TAG == TERMINATE) {
+    
+    if (!received_termination_signal) {
+        MPI_Test(&stopping_request, &message_received, &status);
+        if (message_received) {
+            // TODO: send free status to all processes sharing solution space ?
             printf("Process %d received termination signal\n", rank);
-            // empty queue
             initializeQueue(solution_queue);
-        } else if (status.MPI_TAG == SEND_STATUS && process_asking_status == -1) {  // TODO: what if SEND_STATUS is again from the same process? possible?
-            // send status message to the source process
-            StatusMessage status_message;
-            status_message.queue_size = getQueueSize(solution_queue);
-            status_message.processes_per_solution_space = count_processes_sharing_solution_space;
-            if (is_my_solution_spaces_ended)
-                status_message.queue_size = size + 1;
-            MPI_Isend(&status_message, 1, MPI_StatusMessage, status.MPI_SOURCE, SEND_STATUS, MPI_COMM_WORLD, &message_request);
-            process_asking_status = status.MPI_SOURCE;
-
-        } else if (status.MPI_TAG == FREE_STATUS && process_asking_status == status.MPI_SOURCE) {
-            process_asking_status = -1;
-        } else if (status.MPI_TAG == SEND_JOB && process_asking_status == status.MPI_SOURCE) {
-            // send block to the source process
-            int queue_size = getQueueSize(solution_queue);
-            int i;
-            BCB block_to_send;
-            if (queue_size == 1) {
-
-                block_to_send = peek(solution_queue);
-
-                processes_sharing_solution_space[count_processes_sharing_solution_space++] = status.MPI_SOURCE;
-
-                // send SHARE_SOLUTION_SPACE message to all other processes in processes_sharing_solution_space
+            // free_request(&stopping_request);
+            received_termination_signal = true;
+            return;
+        }
+    }
+    
+    if (is_manager) {
+        if (process_asking_status == -1) {
+            
+            message_received = 0;
+            MPI_Test(&send_status_request, &message_received, &status);  // test if a send status request has been received
+            // printf("Process %d received %d\n", rank, message_received);
+            if (message_received) {
                 
-                int buffer[size * size * 2 + 1];
-                memcpy(buffer, block_to_send.solution, board.rows_count * board.cols_count * sizeof(CellState));
-                if (is_my_solution_spaces_ended)
-                    buffer[0] = UNKNOWN;
-                for (i = 0; i < board.rows_count * board.cols_count; i++) {
-                    buffer[board.rows_count * board.cols_count + i] = block_to_send.solution_space_unknowns[i] ? 1 : 0;
-                }
+                if (status.MPI_SOURCE == -2)
+                    printf("[ERROR] Process %d received from source -2\n", rank);
+                printf("Process %d received send status from process %d, process asking status %d\n", rank, status.MPI_SOURCE, process_asking_status);
 
-                int target_process;
-                for (i = 0; i < size; i++) {
-                    target_process = processes_sharing_solution_space[i];
-                    if (target_process >= 0) {
-                        buffer[size * size * 2] = i + 1;
-                        MPI_Isend(buffer, size * size * 2 + 1, MPI_INT, target_process, SHARE_SOLUTION_SPACE, MPI_COMM_WORLD, &message_request);
+                if (process_asking_status == -1) {
+                    // send status message to the source process
+                    StatusMessage status_message;
+                    status_message.queue_size = getQueueSize(solution_queue);
+                    status_message.processes_per_solution_space = count_processes_sharing_solution_space;
+                    if (is_my_solution_spaces_ended)
+                        status_message.queue_size = size + 1;
+                    // If the source process is already sharing the solution space, set the maximum queue size
+                    for (i = 0; i < count_processes_sharing_solution_space; i++) {
+                        if (processes_sharing_solution_space[i] == status.MPI_SOURCE) {
+                            status_message.queue_size = size + 1;
+                            break;
+                        }
                     }
+                    
+                    MPI_Request send_status_request;
+                    MPI_Isend(&status_message, 1, MPI_StatusMessage, status.MPI_SOURCE, RECEIVE_STATUS, MPI_COMM_WORLD, &send_status_request);
+                    process_asking_status = status.MPI_SOURCE;
+                    // free_request(&send_status_request);
+                    // MPI_Request_free(&send_status_request);
+                    printf("Process %d waiting for free status or send job\n", rank);
+                    MPI_Irecv(NULL, 0, MPI_INT, status.MPI_SOURCE, FREE_STATUS, MPI_COMM_WORLD, &free_status_request);
+                    MPI_Irecv(NULL, 0, MPI_INT, status.MPI_SOURCE, SEND_JOB, MPI_COMM_WORLD, &send_job_request);
                 }
-                shared_solution_space_order = 0;
-
-            } else if (queue_size > 1) {
-                int buffer[size * size * 2];
-                block_to_send = dequeue(solution_queue);
-                memcpy(buffer, block_to_send.solution, board.rows_count * board.cols_count * sizeof(CellState));
-                for (i = 0; i < board.rows_count * board.cols_count; i++) {
-                    buffer[board.rows_count * board.cols_count + i] = block_to_send.solution_space_unknowns[i] ? 1 : 0;
-                }
-                MPI_Isend(buffer, size * size * 2, MPI_INT, status.MPI_SOURCE, SEND_JOB, MPI_COMM_WORLD, &message_request);
             }
-            process_asking_status = -1;
+        }
+
+        if (process_asking_status != -1) {
+            message_received = 0;
+            MPI_Test(&free_status_request, &message_received, &status);  // test if a free status request has been received
+            if (message_received) {
+
+                printf("Process %d received free status from process %d\n", rank, status.MPI_SOURCE);
+
+                if (process_asking_status != status.MPI_SOURCE) 
+                    printf("[ERROR] Process %d received free status from process %d (should not happen as process_asking_status=%d)\n", rank, status.MPI_SOURCE, process_asking_status);
+                process_asking_status = -1;
+                // free_request(&free_status_request);
+                // free_request(&send_job_request);
+                MPI_Irecv(NULL, 0, MPI_INT, MPI_ANY_SOURCE, SEND_STATUS, MPI_COMM_WORLD, &send_status_request);
+            }
+            
+            message_received = 0;
+            MPI_Test(&send_job_request, &message_received, &status);  // test if a send job request has been received
+            if (message_received) {
+
+                printf("Process %d received send job from process %d\n", rank, status.MPI_SOURCE);
+
+                if (process_asking_status != status.MPI_SOURCE) 
+                    printf("[ERROR] Process %d received send job from process %d (should not happen as process_asking_status=%d)\n", rank, status.MPI_SOURCE, process_asking_status);
+                
+                // send block to the source process
+                BCB block_to_send;
+                int queue_size = getQueueSize(solution_queue);
+                int *buffer;
+                
+                if (queue_size == 1) {
+
+                    block_to_send = peek(solution_queue);
+
+                    processes_sharing_solution_space[count_processes_sharing_solution_space++] = status.MPI_SOURCE;
+
+                    // send SHARE_SOLUTION_SPACE message to all other processes in processes_sharing_solution_space
+                    
+                    block_to_buffer(&block_to_send, &buffer);
+
+                    int target_process;
+                    for (i = 0; i < count_processes_sharing_solution_space; i++) {
+                        target_process = processes_sharing_solution_space[i];
+                        if (target_process >= 0) {
+                            buffer[size * size * 2] = i + 1;
+                            MPI_Request share_solution_request;
+                            printf("Process %d sending share solution to process %d\n", rank, target_process);
+                            MPI_Isend(buffer, size * size * 2 + 1, MPI_INT, target_process, SHARE_SOLUTION_SPACE, MPI_COMM_WORLD, &share_solution_request);
+                        } else {
+                            printf("[ERROR] Process %d has invalid target process %d\n", rank, target_process);
+                            break;
+                        }
+                    }
+                    shared_solution_space_order = 0;
+
+                } else if (queue_size > 1) {
+                    block_to_send = dequeue(solution_queue);
+                    block_to_buffer(&block_to_send, &buffer);
+                    MPI_Request send_job_request;
+                    MPI_Isend(buffer, size * size * 2 + 1, MPI_INT, status.MPI_SOURCE, RECEIVE_JOB, MPI_COMM_WORLD, &send_job_request);
+                } else {
+                    printf("[ERROR] Process %d has no solution spaces, queue_size %d, %d\n", rank, queue_size, isEmpty(solution_queue));
+                    
+                    block_to_send.solution = malloc(board.rows_count * board.cols_count * sizeof(CellState));
+                    block_to_send.solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool));
+
+                    memset(block_to_send.solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(CellState));
+                    memset(block_to_send.solution_space_unknowns, false, board.rows_count * board.cols_count * sizeof(bool));
+                    
+                    block_to_buffer(&block_to_send, &buffer);
+                    buffer[0] = UNKNOWN;
+                    MPI_Request send_job_request;
+                    printf("[ERROR] Process %d sending unknown buffer to %d\n", rank, status.MPI_SOURCE);
+                    MPI_Isend(buffer, size * size * 2 + 1, MPI_INT, status.MPI_SOURCE, RECEIVE_JOB, MPI_COMM_WORLD, &send_job_request);
+                    printf("[ERROR] Process %d sent unknown buffer\n", rank);
+                }
+
+                process_asking_status = -1;
+                // free_request(&free_status_request);
+                // free_request(&send_job_request);
+                MPI_Irecv(NULL, 0, MPI_INT, MPI_ANY_SOURCE, SEND_STATUS, MPI_COMM_WORLD, &send_status_request);
+            }
+        }
+    }
+
+    if (process_asking_status != -1 && count_processes_sharing_solution_space > 0) {
+        message_received = 0;
+        MPI_Test(&share_solution_request, &message_received, MPI_STATUS_IGNORE);  // test if a share solution request has been received
+        if (message_received) {
+
+            printf("Process %d received share solution from process %d\n", rank, status.MPI_SOURCE);
+
+            // receive block from the source process
+            BCB new_block;
+            bool success = buffer_to_block(share_solution_buffer, &new_block);
+            if (!success) {
+                printf("[ERROR] %d Finishing without asking for other jobs\n", rank);
+                return;
+            }
+
+            shared_solution_space_order = share_solution_buffer[size * size * 2];
+            count_processes_sharing_solution_space++;
+            initializeQueue(solution_queue);
+            enqueue(solution_queue, &new_block);
         }
     }
 }
@@ -1795,12 +1978,28 @@ bool solution5() {
     
     for (i = 0; i < SOLUTION_SPACES; i++) {
         solution_space_manager[i] = i % size;
-        if (i % size == rank)
+        if (i % size == rank) {
             my_solution_spaces[count++] = i;
+            is_manager = true;
+        }
+    }
+
+    /*
+        For each process, initialize a background task that waits for a termination signal
+    */
+    
+    MPI_Irecv(&solver_process, 1, MPI_INT, MPI_ANY_SOURCE, TERMINATE, MPI_COMM_WORLD, &stopping_request);
+    
+    for (i = 0; i < SOLUTION_SPACES; i++) {
+        if (solution_space_manager[i] == rank) {
+            printf("Processor %d is manager for solution space %d\n", rank, i);
+            MPI_Irecv(NULL, 0, MPI_INT, MPI_ANY_SOURCE, SEND_STATUS, MPI_COMM_WORLD, &send_status_request);
+            break;
+        }
     }
 
     // print solution space manager
-    if (rank == 0) {
+    /* if (rank == 0) {
         printf("Processor %d:\n", rank);
         for (i = 0; i < SOLUTION_SPACES; i++) {
             printf("    %d: %d\n", i, solution_space_manager[i]);
@@ -1812,7 +2011,7 @@ bool solution5() {
             printf("    %d: %d\n", i, my_solution_spaces[i]);
         }
         printf("\n");
-    }
+    } */
 
     bool leaf_found = false;
     BCB blocks[SOLUTION_SPACES];
@@ -1841,17 +2040,17 @@ bool solution5() {
         }
     }
 
-    if (rank == 0) {
-        print_block("First", &blocks[0]);
-    }
-
     // if (rank == 2) print_board("First", board, SOLUTION);
+
+    if(isEmpty(&solution_queue) && rank == 4) {
+        ask_for_other_solution_space(&solution_queue, solution_space_manager);
+    }
 
     while(!isEmpty(&solution_queue)) {
 
         // if (rank == 2) printQueue(&solution_queue);
 
-        BCB current_solution = dequeue(&solution_queue);
+        BCB current_solution = dequeue(&solution_queue);  //TODO: check if it is possible that it calls dequeue on an empty queue
 
         // if (rank == 2) printQueue(&solution_queue);
 
@@ -1859,7 +2058,6 @@ bool solution5() {
 
         // if (rank == 2) printf("[%d] Leaf found: %d\n", rank, leaf_found);
 
-        // TODO: add check for reaching solution space end
         if (leaf_found) {
             // if (rank == 2) print_board("Testing solution", board, SOLUTION);
             if (check_hitori_conditions(&current_solution)) {
@@ -1874,7 +2072,7 @@ bool solution5() {
             ask_for_other_solution_space(&solution_queue, solution_space_manager);
         else
             check_for_messages(&solution_queue);
-    }   
+    }
 
     return false;
 }
@@ -1895,9 +2093,16 @@ int main(int argc, char** argv) {
     /*
         Allocate the processes_sharing_solution_space array
     */
-
+    
     processes_sharing_solution_space = (int *) malloc(size * sizeof(int));
+    share_solution_buffer = (int *) malloc((size * size * 2 + 1) * sizeof(int));
     memset(processes_sharing_solution_space, -1, size * sizeof(int));
+    memset(share_solution_buffer, -1, (size * size * 2 + 1) * sizeof(int));
+
+    int i, count = 0;
+    MPI_Request process_finished_requests[size - 1];
+    for (i = 0; i < size; i++)
+        if (i != rank) MPI_Irecv(NULL, 0, MPI_INT, i, PROCESS_FINISHED, MPI_COMM_WORLD, &process_finished_requests[count++]);
 
     /*
         Read the board from the input file
@@ -1905,7 +2110,24 @@ int main(int argc, char** argv) {
 
     if (rank == 0) read_board(&board.grid, &board.rows_count, &board.cols_count, &board.solution);
     
-    // TODO: check that board is NxN with max number equal to N
+    /*
+        Commit the MPI_Datatype for the StatusMessage struct
+    */
+
+    MPI_Datatype types[2] = {MPI_INT, MPI_INT};
+    int blocklengths[2] = {1, 1};
+
+    StatusMessage dummy_message;
+    MPI_Aint base_address, offsets[2];
+    MPI_Get_address(&dummy_message, &base_address);
+    MPI_Get_address(&dummy_message.queue_size, &offsets[0]);
+    MPI_Get_address(&dummy_message.processes_per_solution_space, &offsets[1]);
+
+    offsets[0] -= base_address;
+    offsets[1] -= base_address;
+
+    MPI_Type_create_struct(2, blocklengths, offsets, types, &MPI_StatusMessage);
+    MPI_Type_commit(&MPI_StatusMessage);
     
     /*
         Share the board with all the processes by packing the data into a single array
@@ -1914,6 +2136,8 @@ int main(int argc, char** argv) {
     */
     
     mpi_share_board();
+
+    MPI_Barrier(MPI_COMM_WORLD);
 
     /*
         Apply the basic hitori pruning techniques to the board.
@@ -1929,7 +2153,6 @@ int main(int argc, char** argv) {
 
     int num_techniques = sizeof(techniques) / sizeof(techniques[0]);
 
-    int i;
     double pruning_start_time = MPI_Wtime();
     Board pruned_solution = techniques[0](board);
     for (i = 1; i < num_techniques; i++) {
@@ -1961,24 +2184,10 @@ int main(int argc, char** argv) {
     double pruning_end_time = MPI_Wtime();
 
     memcpy(board.solution, pruned_solution.solution, board.rows_count * board.cols_count * sizeof(CellState));
-
-    /*
-        For each process, initialize a background task that waits for a termination signal
-    */
     
-    MPI_Irecv(&solver_process, 1, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &message_request);
-
     /*
         Apply the recursive backtracking algorithm to find the solution
     */
-
-    if (rank == 0) print_board("Initial", board, BOARD);
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    if (rank == 0) print_board("Pruned", pruned_solution, SOLUTION);
-
-    MPI_Barrier(MPI_COMM_WORLD);
 
     Board final_solution = deep_copy(pruned_solution);
     double recursive_start_time = MPI_Wtime();
@@ -1991,16 +2200,25 @@ int main(int argc, char** argv) {
         printf("[%d] Solution found\n", rank);
         print_board("Solution", board, SOLUTION);
         
+        received_termination_signal = true;
         for (i = 0; i < size; i++) {
             if (i != rank) {
-                printf("Sending termination signal from %d to %d\n", rank, i);
-                MPI_Send(&rank, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+                // printf("Sending termination signal from %d to %d\n", rank, i);
+                MPI_Isend(&rank, 1, MPI_INT, i, TERMINATE, MPI_COMM_WORLD, &dummy_request);
             }
         }
-    } else {
-        printf("Processor %d is finished\n", rank);
     }
+    
+    printf("Processor %d is finished\n", rank);
 
+    MPI_Request finished_requests[size - 1];
+    // send process finished message to all other processes
+    for (i = 0; i < size; i++)
+        if (i != rank) {
+            // printf("Sending process finished message from %d to %d\n", rank, i);
+            MPI_Isend(NULL, 0, MPI_INT, i, PROCESS_FINISHED, MPI_COMM_WORLD, &finished_requests[i]);
+            finished_requests[i] = MPI_REQUEST_NULL;
+        }
 
     /*
         All the processes that finish early, with the solution not been found, will remain idle.
@@ -2011,6 +2229,33 @@ int main(int argc, char** argv) {
     */  
 
     double recursive_end_time = MPI_Wtime();
+
+    MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_RETURN);
+
+    // wait all other processes finished messages and keep checking for messages
+    MPI_Status statuses[size - 1];
+    int process_finished_requests_completed = 0, err = 0;
+    while(true) {
+        err = MPI_Testall(size - 1, process_finished_requests, &process_finished_requests_completed, statuses);
+        if (err != MPI_SUCCESS) {
+            printf("error\n");
+            for (i = 0; i < size - 1; i++) {
+                if (statuses[i].MPI_ERROR != MPI_SUCCESS) {
+                    
+                    char err_str[MPI_MAX_ERROR_STRING];
+                    int err_len;
+                    MPI_Error_string(statuses[i].MPI_ERROR, err_str, &err_len);
+                    printf("MPI_Test error: %s\n", err_str);
+                    printf("[ERROR] Process %d received error from process %d - %d\n", rank, statuses[i].MPI_SOURCE, statuses[i].MPI_ERROR);
+                }
+            }
+        }
+        if (process_finished_requests_completed) {
+            printf("[%d] exiting\n", rank);
+            break;
+        }
+        check_for_messages(&solution_queue);
+    }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
