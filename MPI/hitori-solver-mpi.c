@@ -152,7 +152,7 @@ void read_board(int **board, int *rows_count, int *cols_count, CellState **solut
         Helper function to read the board from the input file.
     */
     
-    FILE *fp = fopen("../test-cases/inputs/input-12x12.txt", "r");
+    FILE *fp = fopen("../test-cases/inputs/input-20x20.txt", "r");
     
     if (fp == NULL) {
         printf("Could not open file.\n");
@@ -1887,7 +1887,6 @@ void worker_send_work(int destination, Queue *queue, int expected_queue_size) {
             block_to_send = peek(queue);
             block_to_buffer(&block_to_send, &send_work_buffer);
             solutions_to_skip_to_send = total_processes_in_solution_space;
-            total_processes_in_solution_space_to_send = ++total_processes_in_solution_space;
             if (processes_in_my_solution_space[destination] == 1)
                 printf("[ERROR] Process %d found process %d already in its solution space\n", rank, destination);
             processes_in_my_solution_space[destination] = 1;
@@ -1896,16 +1895,23 @@ void worker_send_work(int destination, Queue *queue, int expected_queue_size) {
             // --- tell the workers in the same solution space to update the next solution space
             int i, count = 0;
             for (i = 0; i < size; i++) {
-                if (rank == i || processes_in_my_solution_space[i] == -1 || i == destination) continue;
+                if (processes_in_my_solution_space[i] == -1 || i == destination) continue;
+                count++;
+            }
+            
+            total_processes_in_solution_space = count + 1; 
+            total_processes_in_solution_space_to_send = total_processes_in_solution_space;
+            count = 0;
+            for (i = 0; i < size; i++) {
+                if (processes_in_my_solution_space[i] == -1 || i == destination) continue;
                 printf("[%d] Processes in my solution space %d, %d\n", rank, i, processes_in_my_solution_space[i]);
                 MPI_Request request = MPI_REQUEST_NULL;
                 send_message(i, &request, REFRESH_SOLUTION_SPACE, ++count, total_processes_in_solution_space, false, W2W_MESSAGE * 4);
-                
             }
-            if (count != total_processes_in_solution_space_to_send - 2)
-                printf("[ERROR] Process %d encountered wrong number of processes sharing solution space: %d %d\n", rank, count, total_processes_in_solution_space_to_send - 2);
-            else
-                printf("[INFO] Process %d encountered correct number of processes sharing solution space: %d %d\n", rank, count, total_processes_in_solution_space_to_send - 2);
+            // if (count != total_processes_in_solution_space_to_send - 2)
+            //     printf("[ERROR] Process %d encountered wrong number of processes sharing solution space: %d %d\n", rank, count, total_processes_in_solution_space_to_send - 2);
+            // else
+            //     printf("[INFO] Process %d encountered correct number of processes sharing solution space: %d %d\n", rank, count, total_processes_in_solution_space_to_send - 2);
             
             // --- open channel for finished solution space message
             // Message finished_solution_space_message;
