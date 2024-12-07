@@ -1,7 +1,7 @@
-CFLAGS= -Wall -lm
+CFLAGS= -Wall -I src/libs
 
-hitori-solver-mpi: hitori-solver-mpi.c
-	mpicc $(CFLAGS) -o hitori-solver-mpi.out hitori-solver-mpi.c
+hitori-solver-mpi: src/hitori-solver-mpi.c
+	mpicc $(CFLAGS) -o build/hitori-solver-mpi.out src/hitori-solver-mpi.c
 
 clean:
-	rm -f hitori-solver-mpi.out
+	rm -f build/hitori-solver-mpi.out

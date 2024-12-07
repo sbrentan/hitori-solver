@@ -1,6 +1,7 @@
 .vscode
 
 # get rid of all executables
+build/
 *.exe
 *.out
 
