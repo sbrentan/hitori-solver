@@ -1,11 +1,9 @@
-#ifndef LIBS_QUEUE_H
-#define LIBS_QUEUE_H
-
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <types.h>
+#include "../include/queue.h"
 
+// Function to initialize the queue
 void initializeQueue(Queue* q) {
     q->front = -1;
     q->rear = -1;
@@ -101,5 +99,3 @@ void printQueue(Queue* q) {
     // // Print the last element
     // printf("%d\n", q->items[q->rear]);
 }
-
-#endif

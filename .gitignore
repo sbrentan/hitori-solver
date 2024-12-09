@@ -6,9 +6,8 @@ build/
 *.out
 
 # get rid of all the output files
+output/
 *.o*
-
-# get rid of all the error files
 *.e*
 
 

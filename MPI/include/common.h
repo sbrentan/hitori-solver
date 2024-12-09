@@ -1,8 +1,18 @@
-#ifndef LIBS_TYPES_H
-#define LIBS_TYPES_H
+#ifndef COMMON_H
+#define COMMON_H
 
-#include "constants.h"
 #include <stdbool.h>
+
+#define DEBUG false
+#define INPUT_PATH "../test-cases/inputs/"
+#define MAX_BUFFER_SIZE 2048
+#define SOLUTION_SPACES 4
+#define MANAGER_RANK 0
+
+#define W2M_MESSAGE 0
+#define M2W_MESSAGE 1
+#define W2W_MESSAGE 2
+#define W2W_BUFFER 3
 
 typedef enum CellState {
     UNKNOWN = -1,
