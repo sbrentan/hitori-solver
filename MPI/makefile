@@ -1,7 +1,19 @@
 CFLAGS= -Wall -lm
+SRC_DIR= src
+BUILD_DIR = build
+OUT_DIR= output
 
-hitori-solver-mpi: hitori-solver-mpi.c
-	mpicc $(CFLAGS) -o hitori-solver-mpi.out hitori-solver-mpi.c
+SRC_FILES= $(wildcard $(SRC_DIR)/*.c)
+TARGET= $(BUILD_DIR)/main.out
+
+all:
+	mkdir -p $(BUILD_DIR)
+	mkdir -p $(OUT_DIR)
+	mpicc $(CFLAGS) -o $(TARGET) $(SRC_FILES)
 
 clean:
-	rm -f hitori-solver-mpi.out
+	rm -rf $(BUILD_DIR)
+
+clean-all:
+	rm -rf $(BUILD_DIR)
+	rm -rf $(OUT_DIR)
