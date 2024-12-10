@@ -224,7 +224,7 @@ void worker_send_work(int destination, int expected_queue_size) {
                 if (processes_in_my_solution_space[i] == -1 || i == destination) continue;
                 count++;
             }
-            
+
             total_processes_in_solution_space = count + 1; 
             total_processes_in_solution_space_to_send = total_processes_in_solution_space;
             count = 0;
@@ -234,14 +234,6 @@ void worker_send_work(int destination, int expected_queue_size) {
                 MPI_Request request = MPI_REQUEST_NULL;
                 send_message(i, &request, REFRESH_SOLUTION_SPACE, ++count, total_processes_in_solution_space, false, W2W_MESSAGE * 4);
             }
-            // if (count != total_processes_in_solution_space_to_send - 2)
-            //     printf("[ERROR] Process %d encountered wrong number of processes sharing solution space: %d %d\n", rank, count, total_processes_in_solution_space_to_send - 2);
-            // else
-            //     printf("[INFO] Process %d encountered correct number of processes sharing solution space: %d %d\n", rank, count, total_processes_in_solution_space_to_send - 2);
-            
-            // --- open channel for finished solution space message
-            // Message finished_solution_space_message;
-            // receive_message(&finished_solution_space_message, MPI_ANY_SOURCE, &finished_solution_space_request, W2W_MESSAGE);
         }
         else if(queue_size > 1) {
             block_to_send = dequeue(&solution_queue);

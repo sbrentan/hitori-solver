@@ -70,7 +70,7 @@ typedef enum MessageType {
                                     // - data1: sender rank
     FINISHED_SOLUTION_SPACE = 6,    // worker finished its solution space and is waiting for a new one. Manager sends finished message to ex master process.
                                     // - data1: worker id that finished
-    
+
     // ======= DEDICATED MESSAGES =======
 
     WORKER_SEND_WORK = 7,           // worker sends work to another worker.

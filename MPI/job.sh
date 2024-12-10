@@ -6,5 +6,5 @@
 #PBS -e ./output/
 
 module load mpich-3.2
-cd ./hitori-solver/MPI_test
+cd ./hitori-solver/MPI
 mpirun.actual -n 8 ./build/main.out input-20x20.txt
