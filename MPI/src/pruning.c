@@ -77,12 +77,8 @@ Board mpi_uniqueness_rule(Board board, int rank, int size) {
     mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
     mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
 
-    Board row_board, col_board;
-
-    if (rank == MANAGER_RANK) {
-        row_board = (Board) { board.grid, board.rows_count, board.cols_count, row_solution };
-        col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
-    }
+    Board row_board = (Board) { board.grid, board.rows_count, board.cols_count, row_solution };
+    Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
 
     Board solution = combine_boards(row_board, col_board, true, rank, "Uniqueness Rule");
 
