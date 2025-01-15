@@ -28,7 +28,7 @@ Replace `name.surname` with your university credentials used for authentication.
 2. When prompted, enter your university credentials.
 3. After a successful login, open your dedicated folder (i.e. `name.surname`). If asked, type again the password.
 
-## MPI Module
+## Environment adjustments
 1. Since the `mpich` module is not available globally, add the following line to the end of your `.bashrc` file:
 
 ```bash
@@ -47,6 +47,19 @@ Finally, to get started with the project, clone the repository into your dedicat
 ```bash
 git clone https://github.com/sbrentan/hitori-solver.git
 ```
+
+## Inside the cluster
+To prevent saturation, it is **strictly forbidden** to run programs directly on the login node. Instead, to run programs, 
+you can use the following three primary commands:
+
+```bash
+qsub job.sh     # Submit the job to the cluster, adhering to the specified PBS directives
+qstat job_id    # Retrieve the statistics for a specific job
+qdel job_id     # Cancel a job if it has not yet completed
+```
+
+Note that `job.sh` includes both the PBS directives, which instruct the cluster on how to manage the job, and the necessary 
+details for execution, such as the modules to load (e.g. `mpich`) and the commands to run (e.g. `mpirun.actual ./main.out -n 8`).
 
 # References
 [Menneske](https://www.menneske.no/hitori/methods/eng/index.html)
