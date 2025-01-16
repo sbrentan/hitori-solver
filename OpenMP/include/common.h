@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 
-#define DEBUG false
+#define DEBUG true
 #define INPUT_PATH "../test-cases/inputs/"
 #define MAX_BUFFER_SIZE 2048
 #define SOLUTION_SPACES 4

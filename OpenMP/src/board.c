@@ -135,8 +135,8 @@ Board combine_boards(Board first_board, Board second_board, bool forced, char *t
     
     int rows = -1, cols = -1;
 
-        rows = first_board.rows_count;
-        cols = first_board.cols_count;
+    rows = first_board.rows_count;
+    cols = first_board.cols_count;
 
 
     /*
@@ -155,9 +155,10 @@ Board combine_boards(Board first_board, Board second_board, bool forced, char *t
     */
 
     memset(merged.solution, UNKNOWN, rows * cols * sizeof(int));
-    #pragma omp parallel for collapse(2)
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
+    int i, j;
+    #pragma omp parallel for collapse(2) private(i,j)
+    for (i = 0; i < rows; i++) {
+        for (j = 0; j < cols; j++) {
             if (first_board.solution[i * cols + j] == second_board.solution[i * cols + j]) 
                 merged.solution[i * cols + j] = first_board.solution[i * cols + j];
             else if (!forced && first_board.solution[i * cols + j] == WHITE && second_board.solution[i * cols + j] == UNKNOWN) 
