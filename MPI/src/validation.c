@@ -1,9 +1,14 @@
 #include <stdlib.h> 
 #include <string.h>
+#include <mpi.h>
 
 #include "../include/validation.h"
 
 bool is_cell_state_valid(Board board, BCB* block, int x, int y, CellState cell_state) {
+
+    // Rule 1: No unshaded number appears in a row or column more than once
+    // Rule 2: Shaded cells cannot be adjacent, although they can touch at a corner
+    
     if (cell_state == BLACK) {
         if (x > 0 && block->solution[(x - 1) * board.cols_count + y] == BLACK) return false;
         if (x < board.rows_count - 1 && block->solution[(x + 1) * board.cols_count + y] == BLACK) return false;
@@ -20,7 +25,7 @@ bool is_cell_state_valid(Board board, BCB* block, int x, int y, CellState cell_s
                 return false;
     }
     return true;
-} 
+}
 
 int dfs_white_cells(Board board, BCB *block, bool* visited, int row, int col) {
     if (row < 0 || row >= board.rows_count || col < 0 || col >= board.cols_count) return 0;
@@ -65,39 +70,18 @@ bool all_white_cells_connected(Board board, BCB* block) {
     return dfs_white_cells(board, block, visited, row, col) == white_cells_count;
 }
 
-bool check_hitori_conditions(Board board, BCB* block) {
+bool check_hitori_conditions(Board board, BCB* block, double* dfs_time, double* conditions_time) {
     
     // Rule 1: No unshaded number appears in a row or column more than once
     // Rule 2: Shaded cells cannot be adjacent, although they can touch at a corner
-
-    int i, j, k;
-    for (i = 0; i < board.rows_count; i++) {
-        for (j = 0; j < board.cols_count; j++) {
-
-            if (block->solution[i * board.cols_count + j] == UNKNOWN) return false;
-
-            if (block->solution[i * board.cols_count + j] == WHITE) {
-                for (k = 0; k < board.rows_count; k++) {
-                    if (k != i && block->solution[k * board.cols_count + j] == WHITE && board.grid[i * board.cols_count + j] == board.grid[k * board.cols_count + j]) return false;
-                }
-
-                for (k = 0; k < board.cols_count; k++) {
-                    if (k != j && block->solution[i * board.cols_count + k] == WHITE && board.grid[i * board.cols_count + j] == board.grid[i * board.cols_count + k]) return false;
-                }
-            }
-
-            if (block->solution[i * board.cols_count + j] == BLACK) {
-                if (i > 0 && block->solution[(i - 1) * board.cols_count + j] == BLACK) return false;
-                if (i < board.rows_count - 1 && block->solution[(i + 1) * board.cols_count + j] == BLACK) return false;
-                if (j > 0 && block->solution[i * board.cols_count + j - 1] == BLACK) return false;
-                if (j < board.cols_count - 1 && block->solution[i * board.cols_count + j + 1] == BLACK) return false;
-            }
-        }
-    }
+    //  - Already checked in is_cell_state_valid while building the leaf
 
     // Rule 3: When completed, all un-shaded (white) squares create a single continuous area
 
-    if (!all_white_cells_connected(board, block)) return false;
+    double start_dfs_time = MPI_Wtime();
+    bool result = all_white_cells_connected(board, block);
+    *dfs_time += MPI_Wtime() - start_dfs_time;
+    if (!result) return false;
 
     return true;
 }

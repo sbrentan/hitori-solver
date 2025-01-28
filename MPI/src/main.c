@@ -41,6 +41,11 @@ Message *worker_messages;
 MPI_Request *worker_requests;   // Requests for the manager to contact the workers
 WorkerStatus *worker_statuses;  // Status of each worker
 
+// ----- Time variables -----
+double backtracking_time = 0;
+double check_time = 0;
+double dfs_time = 0;
+double conditions_time = 0;
 
 /* ------------------ FUNCTION DECLARATIONS ------------------ */
 
@@ -457,9 +462,15 @@ bool hitori_mpi_solution() {
         
         init_solution_space(board, &blocks[i], my_solution_spaces[i], &unknown_index);
 
+        double backtracking_start_time = MPI_Wtime();
         leaf_found = build_leaf(board, &blocks[i], 0, 0, &unknown_index, &unknown_index_length, &total_processes_in_solution_space, &solutions_to_skip);
+        backtracking_time += MPI_Wtime() - backtracking_start_time;
 
-        if (check_hitori_conditions(board, &blocks[i])) {
+        double check_start_time = MPI_Wtime();
+        bool checked = check_hitori_conditions(board, &blocks[i], &dfs_time, &conditions_time);
+        check_time += MPI_Wtime() - check_start_time;
+        
+        if (checked) {
             memcpy(board.solution, blocks[i].solution, board.rows_count * board.cols_count * sizeof(CellState));
             terminated = true;
             MPI_Request terminate_message_request = MPI_REQUEST_NULL;
@@ -496,10 +507,15 @@ bool hitori_mpi_solution() {
             if (queue_size > 0) {
                 BCB current_solution = dequeue(&solution_queue);
 
+                double nextleaf_start_time = MPI_Wtime();
                 leaf_found = next_leaf(board, &current_solution, &unknown_index, &unknown_index_length, &total_processes_in_solution_space, &solutions_to_skip);
+                backtracking_time += MPI_Wtime() - nextleaf_start_time;
 
                 if (leaf_found) {
-                    if (check_hitori_conditions(board, &current_solution)) {
+                    double check_start_time_2 = MPI_Wtime();
+                    bool checked = check_hitori_conditions(board, &current_solution, &dfs_time, &conditions_time);
+                    check_time += MPI_Wtime() - check_start_time_2;
+                    if (checked) {
                         memcpy(board.solution, current_solution.solution, board.rows_count * board.cols_count * sizeof(CellState));
                         terminated = true;
                         MPI_Request terminate_message_request = MPI_REQUEST_NULL;
@@ -633,6 +649,21 @@ int main(int argc, char** argv) {
     MPI_Barrier(MPI_COMM_WORLD);
     
     printf("[%d] Time for recursive part: %f\n", rank, recursive_end_time - recursive_start_time);
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    printf("[%d] Time for backtracking: %f\n", rank, backtracking_time);
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    printf("[%d] Time for checking hitori: %f\n", rank, check_time);
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    printf("[%d] Time for other stuff: %f\n", rank, (recursive_end_time - recursive_start_time) - (backtracking_time + check_time));
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    printf("[%d] Time for dfs: %f\n", rank, dfs_time);
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    printf("[%d] Time for conditions: %f\n", rank, conditions_time);
     MPI_Barrier(MPI_COMM_WORLD);
     
     /*
