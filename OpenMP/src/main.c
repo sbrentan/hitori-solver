@@ -6,42 +6,98 @@
 #include <stdbool.h>
 #include <math.h>
 
-
 #include "../include/common.h"
 #include "../include/board.h"
 #include "../include/utils.h"
 #include "../include/pruning.h"
+#include "../include/queue.h"
+#include "../include/validation.h"
+#include "../include/backtracking.h"
 
 /* ------------------ GLOBAL VARIABLES ------------------ */
 Board board;
 Queue solution_queue;
 
 // ----- Backtracking variables -----
-// bool terminated = false;
+bool terminated = false;
 // bool is_my_solution_spaces_ended = false;
-// int solutions_to_skip = 0;
+int solutions_to_skip = 0;
 // int total_processes_in_solution_space = 1;
 int *unknown_index, *unknown_index_length;
 
 bool hitori_openmp_solution() {
 
+    int max_threads = omp_get_max_threads();
+
     int i, count = 0;
-    // int solution_space_manager[SOLUTION_SPACES];
+
     int my_solution_spaces[SOLUTION_SPACES];
-    
-    // memset(solution_space_manager, -1, SOLUTION_SPACES * sizeof(int));
     memset(my_solution_spaces, -1, SOLUTION_SPACES * sizeof(int));
-    
-    for (i = 0; i < SOLUTION_SPACES; i++) {
-        // solution_space_manager[i] = i % size;
-        if (i % size == rank) {
+
+    int initial_threads = SOLUTION_SPACES > max_threads ? max_threads : SOLUTION_SPACES;
+    #pragma omp parallel num_threads(initial_threads) private(i, my_solution_spaces, count)
+    {
+        int rank = omp_get_thread_num();
+        for (i = rank; i < SOLUTION_SPACES; i += initial_threads)
             my_solution_spaces[count++] = i;
+
+        int my_threads = max_threads / initial_threads;
+        int remaining_threads = max_threads % initial_threads;
+        if (rank < remaining_threads) my_threads++;
+
+        BCB blocks[SOLUTION_SPACES];
+        int build_leaf_threads = my_threads > count ? count : my_threads;
+        
+        #pragma omp for num_threads(build_leaf_threads) private(i)
+        for (i = 0; i < count; i++) {
+            init_solution_space(board, &blocks[i], my_solution_spaces[i], &unknown_index);
+
+            int threads_in_solution_space = 1;
+            bool leaf_found = build_leaf(board, &blocks[i], 0, 0, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
+            
+            if (leaf_found) {
+                // TODO: parallelize?
+                if (check_hitori_conditions(board, &blocks[i])) {
+                    #pragma omp critical
+                    {
+                        memcpy(board.solution, blocks[i].solution, board.rows_count * board.cols_count * sizeof(CellState));
+                        terminated = true;
+                    }
+                }
+
+                if (!terminated) {
+                    #pragma omp critical
+                    {
+                        enqueue(&solution_queue, &blocks[i]);
+                    }
+                }
+
+            } else {
+                printf("Processor %d failed to find a leaf\n", rank);
+            }
         }
-        if (rank == MANAGER_RANK) {
-            worker_statuses[i % size].queue_size++;
-            worker_statuses[i % size].processes_sharing_solution_space = 1;
+        
+        while(!terminated) {
+            if (!isEmpty(&solution_queue)) {
+                BCB current;    
+
+                #pragma omp critical
+                {
+                    current = dequeue(&solution_queue);
+                }
+
+                int threads_in_solution_space = 1;
+                bool leaf_found = next_leaf(board, &current, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
+
+
+            }
         }
     }
+
+
+
+
+    // -------------------------
 
     bool leaf_found = false;
     BCB blocks[SOLUTION_SPACES];
@@ -70,15 +126,15 @@ bool hitori_openmp_solution() {
         }
     }
     // TODO: send status to manager if not all leafs found (CONVERT TO GATHER????)
-    int queue_size = getQueueSize(&solution_queue);
-    if (queue_size > 0 && count > 0) {
-        MPI_Request status_update_request = MPI_REQUEST_NULL;
-        send_message(MANAGER_RANK, &status_update_request, STATUS_UPDATE, queue_size, 1, false, W2M_MESSAGE);
-    } else if (queue_size == 0) {
-        is_my_solution_spaces_ended = true;
-        MPI_Request ask_work_request = MPI_REQUEST_NULL;
-        send_message(MANAGER_RANK, &ask_work_request, ASK_FOR_WORK, -1, -1, false, W2M_MESSAGE);
-    }
+    // int queue_size = getQueueSize(&solution_queue);
+    // if (queue_size > 0 && count > 0) {
+    //     MPI_Request status_update_request = MPI_REQUEST_NULL;
+    //     send_message(MANAGER_RANK, &status_update_request, STATUS_UPDATE, queue_size, 1, false, W2M_MESSAGE);
+    // } else if (queue_size == 0) {
+    //     is_my_solution_spaces_ended = true;
+    //     MPI_Request ask_work_request = MPI_REQUEST_NULL;
+    //     send_message(MANAGER_RANK, &ask_work_request, ASK_FOR_WORK, -1, -1, false, W2M_MESSAGE);
+    // }
 
     while(!terminated) {
 
