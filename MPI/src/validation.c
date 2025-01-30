@@ -20,7 +20,52 @@ bool is_cell_state_valid(Board board, BCB* block, int x, int y, CellState cell_s
                 return false;
     }
     return true;
-} 
+}
+
+int bfs_white_cells(Board board, BCB *block, bool *visited, int row, int col) {
+
+    const int directions[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    int i, count = 0; // Counter for white cells
+    
+    // Queues for BFS, one for x coordinates and one for y coordinates
+    int max_size = board.rows_count * board.cols_count;
+    int queue_x[max_size], queue_y[max_size];
+    int front = 0, back = 0;
+
+    // Enqueue the starting cell and visit it
+    queue_x[back] = row;
+    queue_y[back++] = col;
+    visited[row * board.cols_count + col] = true;
+
+    while (front < back) {
+        
+        // Dequeue a cell
+        int cur_x = queue_x[front];
+        int cur_y = queue_y[front++];
+
+        // Increment the count of white cells
+        count++;
+
+        // Check all 4 directions
+        for (i = 0; i < 4; i++) {
+            int new_row = cur_x + directions[i][0];
+            int new_col = cur_y + directions[i][1];
+            int new_index = new_row * board.cols_count + new_col;
+
+            if (new_row >= 0 && new_row < board.rows_count && new_col >= 0 && new_col < board.cols_count) {
+                if (!visited[new_index] && block->solution[new_index] == WHITE) {
+
+                    // Enqueue the new white cell and visit it
+                    visited[new_index] = true;
+                    queue_x[back] = new_row;
+                    queue_y[back++] = new_col;
+                }
+            }
+        }
+    }
+
+    return count;
+}
 
 int dfs_white_cells(Board board, BCB *block, bool* visited, int row, int col) {
     if (row < 0 || row >= board.rows_count || col < 0 || col >= board.cols_count) return 0;
@@ -37,10 +82,17 @@ int dfs_white_cells(Board board, BCB *block, bool* visited, int row, int col) {
     return count;
 }
 
-bool all_white_cells_connected(Board board, BCB* block) {
+bool check_hitori_conditions(Board board, BCB* block) {
+    
+    // Rule 1: No unshaded number appears in a row or column more than once
+    // Rule 2: Shaded cells cannot be adjacent, although they can touch at a corner
+    // -- Already checked by is_cell_state_valid
 
-    bool *visited = malloc((board.rows_count * board.cols_count) * sizeof(bool));
-    memset(visited, false, board.rows_count * board.cols_count * sizeof(bool));
+    // Rule 3: When completed, all un-shaded (white) squares create a single continuous area
+
+    int board_size = board.rows_count * board.cols_count;
+    bool visited[board_size];
+    memset(visited, false, board_size * sizeof(bool));
 
     // Count all the white cells, and find the first white cell
     int i, j;
@@ -61,43 +113,6 @@ bool all_white_cells_connected(Board board, BCB* block) {
         }
     }
 
-    // Rule 3: When completed, all un-shaded (white) squares create a single continuous area
-    return dfs_white_cells(board, block, visited, row, col) == white_cells_count;
-}
-
-bool check_hitori_conditions(Board board, BCB* block) {
-    
-    // Rule 1: No unshaded number appears in a row or column more than once
-    // Rule 2: Shaded cells cannot be adjacent, although they can touch at a corner
-
-    int i, j, k;
-    for (i = 0; i < board.rows_count; i++) {
-        for (j = 0; j < board.cols_count; j++) {
-
-            if (block->solution[i * board.cols_count + j] == UNKNOWN) return false;
-
-            if (block->solution[i * board.cols_count + j] == WHITE) {
-                for (k = 0; k < board.rows_count; k++) {
-                    if (k != i && block->solution[k * board.cols_count + j] == WHITE && board.grid[i * board.cols_count + j] == board.grid[k * board.cols_count + j]) return false;
-                }
-
-                for (k = 0; k < board.cols_count; k++) {
-                    if (k != j && block->solution[i * board.cols_count + k] == WHITE && board.grid[i * board.cols_count + j] == board.grid[i * board.cols_count + k]) return false;
-                }
-            }
-
-            if (block->solution[i * board.cols_count + j] == BLACK) {
-                if (i > 0 && block->solution[(i - 1) * board.cols_count + j] == BLACK) return false;
-                if (i < board.rows_count - 1 && block->solution[(i + 1) * board.cols_count + j] == BLACK) return false;
-                if (j > 0 && block->solution[i * board.cols_count + j - 1] == BLACK) return false;
-                if (j < board.cols_count - 1 && block->solution[i * board.cols_count + j + 1] == BLACK) return false;
-            }
-        }
-    }
-
-    // Rule 3: When completed, all un-shaded (white) squares create a single continuous area
-
-    if (!all_white_cells_connected(board, block)) return false;
-
-    return true;
+    // return dfs_white_cells(board, block, visited, row, col) == white_cells_count;
+    return bfs_white_cells(board, block, visited, row, col) == white_cells_count;
 }
