@@ -1,8 +1,11 @@
 #include <stdlib.h> 
 #include <string.h>
 #include <stdio.h>
+#include <omp.h>
 
 #include "../include/validation.h"
+
+#define BFS_THREADS 2
 
 bool is_cell_state_valid(Board board, BCB* block, int x, int y, CellState cell_state) {
 
@@ -29,40 +32,69 @@ bool is_cell_state_valid(Board board, BCB* block, int x, int y, CellState cell_s
 int bfs_white_cells(Board board, BCB *block, bool *visited, int row, int col) {
 
     const int directions[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-    int i, count = 0; // Counter for white cells
+    int i, count = 0, visited_count = 0; // Counters for white cells and visited cells
     
-    // Queues for BFS, one for x coordinates and one for y coordinates
-    int max_size = board.rows_count * board.cols_count;
-    int queue_x[max_size], queue_y[max_size];
+    int board_size = board.rows_count * board.cols_count;
+    int queue_x[board_size], queue_y[board_size];
     int front = 0, back = 0;
 
-    // Enqueue the starting cell and visit it
+    // Enqueue the starting cell
     queue_x[back] = row;
     queue_y[back++] = col;
     visited[row * board.cols_count + col] = true;
+    visited_count++;
 
-    while (front < back) {
+    // Limit the number of threads to avoid synchronization overhead
+    #pragma omp parallel num_threads(BFS_THREADS) reduction(+:count) private(i)
+    {
+        int tid = omp_get_thread_num();
         
-        // Dequeue a cell
-        int cur_x = queue_x[front];
-        int cur_y = queue_y[front++];
+        while (visited_count < board_size || front < back) { // While there are unvisited cells or the queue is not empty
+            
+            int cur_x = -1, cur_y = -1;
 
-        // Increment the count of white cells
-        count++;
+            // Dequeue a cell
+            #pragma omp critical
+            {
+                if (front < back) { // Check if the queue is not empty
+                    cur_x = queue_x[front];
+                    cur_y = queue_y[front++];
+                }
+            }
 
-        // Check all 4 directions
-        for (i = 0; i < 4; i++) {
-            int new_row = cur_x + directions[i][0];
-            int new_col = cur_y + directions[i][1];
-            int new_index = new_row * board.cols_count + new_col;
+            // Check if the cell is valid
+            if (cur_x == -1 || cur_y == -1) continue;
 
-            if (new_row >= 0 && new_row < board.rows_count && new_col >= 0 && new_col < board.cols_count) {
-                if (!visited[new_index] && block->solution[new_index] == WHITE) {
+            if (DEBUG) printf("[%d] Dequeued cell: (%d, %d)\n", tid, cur_x, cur_y);
 
-                    // Enqueue the new white cell and visit it
-                    visited[new_index] = true;
-                    queue_x[back] = new_row;
-                    queue_y[back++] = new_col;
+            count++; // Count the current white cell
+
+            // Process all the adjacent cells
+            for (i = 0; i < 4; i++) {
+                int new_row = cur_x + directions[i][0];
+                int new_col = cur_y + directions[i][1];
+                int new_index = new_row * board.cols_count + new_col;
+
+                bool row_in_bounds = new_row >= 0 && new_row < board.rows_count;
+                bool col_in_bounds = new_col >= 0 && new_col < board.cols_count;
+
+                if (row_in_bounds && col_in_bounds && !visited[new_index]) {
+
+                    // Visit the new cell
+                    #pragma omp critical
+                    {
+                        if (!visited[new_index]) { // Double-check inside critical section
+                            visited[new_index] = true;
+                            visited_count++; // Increment the total visited cells count
+                            
+                            // Enqueue the new white cell
+                            if (block->solution[new_index] == WHITE) {
+                                queue_x[back] = new_row;
+                                queue_y[back++] = new_col;
+                                if (DEBUG) printf("[%d] Enqueued cell: (%d, %d)\n", tid, new_row, new_col);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -73,6 +105,7 @@ int bfs_white_cells(Board board, BCB *block, bool *visited, int row, int col) {
 
 bool check_hitori_conditions(Board board, BCB* block) {
     
+
     /*
         Hitori Rules:
             Rule 1: No unshaded number appears in a row or column more than once (✓)
@@ -109,3 +142,4 @@ bool check_hitori_conditions(Board board, BCB* block) {
     // Check if the number of white cells is equal to the number of connected white cells (meaning a single continuous area)
     return bfs_white_cells(board, block, visited, row, col) == white_cells_count;
 }
+
