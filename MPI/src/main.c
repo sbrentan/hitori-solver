@@ -599,7 +599,8 @@ int main(int argc, char** argv) {
         Initialize the backtracking variables
     */
     
-    board = pruned;
+    // board = pruned;
+    memcpy(board.solution, pruned.solution, board.rows_count * board.cols_count * sizeof(CellState));
     initializeQueue(&solution_queue);
     init_requests_and_messages();
 

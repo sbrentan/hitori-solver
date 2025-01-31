@@ -29,153 +29,122 @@ bool hitori_openmp_solution() {
 
     int max_threads = omp_get_max_threads();
 
-    int i, count = 0;
+    int i, count;
 
     int my_solution_spaces[SOLUTION_SPACES];
     memset(my_solution_spaces, -1, SOLUTION_SPACES * sizeof(int));
 
     int initial_threads = SOLUTION_SPACES > max_threads ? max_threads : SOLUTION_SPACES;
+    if (DEBUG) printf("Initial threads: %d\n", initial_threads);
     #pragma omp parallel num_threads(initial_threads) private(i, my_solution_spaces, count)
     {
+        count = 0;
         int rank = omp_get_thread_num();
-        for (i = rank; i < SOLUTION_SPACES; i += initial_threads)
+        if (DEBUG) printf("Rank: %d\n", rank);
+        for (i = rank; i < SOLUTION_SPACES; i += initial_threads) {
+            if (DEBUG) printf("[%d] Adding solution space %d %d\n", rank, i, count);
             my_solution_spaces[count++] = i;
+        }
 
         int my_threads = max_threads / initial_threads;
         int remaining_threads = max_threads % initial_threads;
         if (rank < remaining_threads) my_threads++;
 
         BCB blocks[SOLUTION_SPACES];
-        int build_leaf_threads = my_threads > count ? count : my_threads;
+        if (DEBUG) printf("[%d] Before initialize solution spaces\n", rank);
+        if (DEBUG) printf("[%d] Count: %d\n", rank, count);
         
-        #pragma omp for num_threads(build_leaf_threads) private(i)
         for (i = 0; i < count; i++) {
-            init_solution_space(board, &blocks[i], my_solution_spaces[i], &unknown_index);
+            if (!terminated) {
+                if (DEBUG) printf("[%d] Initializing solution space %d with i %d\n", rank, my_solution_spaces[i], i);
+                init_solution_space(board, &blocks[i], my_solution_spaces[i], &unknown_index);
 
-            int threads_in_solution_space = 1;
-            bool leaf_found = build_leaf(board, &blocks[i], 0, 0, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
-            
-            if (leaf_found) {
-                // TODO: parallelize?
-                if (check_hitori_conditions(board, &blocks[i])) {
-                    #pragma omp critical
-                    {
-                        memcpy(board.solution, blocks[i].solution, board.rows_count * board.cols_count * sizeof(CellState));
-                        terminated = true;
+                // TODO: Remove threads_in_solution_space and solutions_to_skip if not using them
+                int threads_in_solution_space = 1;
+                if (DEBUG) printf("[%d] Building leaf for solution space %d\n", rank, my_solution_spaces[i]);
+                bool leaf_found = build_leaf(board, &blocks[i], 0, 0, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
+                if (DEBUG) printf("[%d] Leaf built for solution space %d\n", rank, my_solution_spaces[i]);
+                if (leaf_found) {
+                    // TODO: parallelize? NO
+                    bool solution_found = check_hitori_conditions(board, &blocks[i]);
+                    if (solution_found) {
+                        if (DEBUG) printf("[%d] Solution found on building\n", rank);
+                        // TODO: do this pragmas block all threads or just the threads created by the last pragma?
+                        #pragma omp critical
+                        {
+                            terminated = true;
+                            memcpy(board.solution, blocks[i].solution, board.rows_count * board.cols_count * sizeof(CellState));
+                        }
+                    } else {
+                        #pragma omp critical
+                        {
+                            enqueue(&solution_queue, &blocks[i]);
+                        }
                     }
-                }
 
-                if (!terminated) {
-                    #pragma omp critical
-                    {
-                        enqueue(&solution_queue, &blocks[i]);
-                    }
+                } else {
+                    if (DEBUG) printf("Failed to find leaf for solution space %d\n", my_solution_spaces[i]);
                 }
-
-            } else {
-                printf("Processor %d failed to find a leaf\n", rank);
             }
         }
+
+        if (DEBUG) printf("[%d] Finished building leaves\n", rank);
+
+        // terminated = true;
+        bool current_found;
         
         while(!terminated) {
             if (!isEmpty(&solution_queue)) {
-                BCB current;    
+                BCB current;
+                current_found = false;
 
                 #pragma omp critical
                 {
-                    current = dequeue(&solution_queue);
-                }
-
-                int threads_in_solution_space = 1;
-                bool leaf_found = next_leaf(board, &current, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
-
-
-            }
-        }
-    }
-
-
-
-
-    // -------------------------
-
-    bool leaf_found = false;
-    BCB blocks[SOLUTION_SPACES];
-
-    for (i = 0; i < SOLUTION_SPACES; i++) {
-        if (my_solution_spaces[i] == -1) break;
-        
-        init_solution_space(board, &blocks[i], my_solution_spaces[i], &unknown_index);
-
-        leaf_found = build_leaf(board, &blocks[i], 0, 0, &unknown_index, &unknown_index_length, &total_processes_in_solution_space, &solutions_to_skip);
-
-        if (check_hitori_conditions(board, &blocks[i])) {
-            memcpy(board.solution, blocks[i].solution, board.rows_count * board.cols_count * sizeof(CellState));
-            terminated = true;
-            MPI_Request terminate_message_request = MPI_REQUEST_NULL;
-            send_message(MANAGER_RANK, &terminate_message_request, TERMINATE, rank, -1, false, W2M_MESSAGE);
-            if (rank == MANAGER_RANK) manager_check_messages();
-            return true;
-        }
-
-        if (leaf_found) {
-            enqueue(&solution_queue, &blocks[i]);
-            count--;
-        } else {
-            printf("Processor %d failed to find a leaf\n", rank);
-        }
-    }
-    // TODO: send status to manager if not all leafs found (CONVERT TO GATHER????)
-    // int queue_size = getQueueSize(&solution_queue);
-    // if (queue_size > 0 && count > 0) {
-    //     MPI_Request status_update_request = MPI_REQUEST_NULL;
-    //     send_message(MANAGER_RANK, &status_update_request, STATUS_UPDATE, queue_size, 1, false, W2M_MESSAGE);
-    // } else if (queue_size == 0) {
-    //     is_my_solution_spaces_ended = true;
-    //     MPI_Request ask_work_request = MPI_REQUEST_NULL;
-    //     send_message(MANAGER_RANK, &ask_work_request, ASK_FOR_WORK, -1, -1, false, W2M_MESSAGE);
-    // }
-
-    while(!terminated) {
-
-        if (rank == MANAGER_RANK) manager_check_messages();
-        worker_check_messages(&solution_queue);
-
-        if (!terminated) {
-            queue_size = getQueueSize(&solution_queue);
-            if (queue_size > 0) {
-                BCB current_solution = dequeue(&solution_queue);
-
-                leaf_found = next_leaf(board, &current_solution, &unknown_index, &unknown_index_length, &total_processes_in_solution_space, &solutions_to_skip);
-
-                if (leaf_found) {
-                    if (check_hitori_conditions(board, &current_solution)) {
-                        memcpy(board.solution, current_solution.solution, board.rows_count * board.cols_count * sizeof(CellState));
-                        terminated = true;
-                        MPI_Request terminate_message_request = MPI_REQUEST_NULL;
-                        send_message(MANAGER_RANK, &terminate_message_request, TERMINATE, rank, -1, false, W2M_MESSAGE);
-                        if (rank == MANAGER_RANK) manager_check_messages();
-                        return true;
-                    } else
-                        enqueue(&solution_queue, &current_solution);
-                } else {
-                    // send update status to manager
-                    if (queue_size > 1) {
-                        MPI_Request status_update_request = MPI_REQUEST_NULL;
-                        send_message(MANAGER_RANK, &status_update_request, STATUS_UPDATE, queue_size - 1, 1, false, W2M_MESSAGE);
-                    } else if (queue_size == 1) {  // now 0
-                        is_my_solution_spaces_ended = true;
-                        printf("Processor %d is asking for work\n", rank);
-                        MPI_Request ask_work_request = MPI_REQUEST_NULL;
-                        send_message(MANAGER_RANK, &ask_work_request, ASK_FOR_WORK, -1, -1, false, W2M_MESSAGE);
+                    if (!isEmpty(&solution_queue)) {
+                        current = dequeue(&solution_queue);
+                        current_found = true;
                     }
                 }
+
+                // check if current is not empty
+                if (!current_found) {
+                    if (DEBUG) printf("[%d] Current is empty\n", rank);
+                    continue;
+                }
+
+                // TODO: Remove threads_in_solution_space and solutions_to_skip if not using them
+                int threads_in_solution_space = 1;
+                bool leaf_found = next_leaf(board, &current, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
+                if (DEBUG) printf("[%d] Next leaf found %d\n", rank, leaf_found);
+
+                if (leaf_found) {
+                    // TODO: parallelize
+                    bool solution_found = check_hitori_conditions(board, &current);
+                    if (solution_found) {
+                        if (DEBUG) printf("[%d] Solution found\n", rank);
+                        #pragma omp critical
+                        {
+                            terminated = true;
+                            memcpy(board.solution, current.solution, board.rows_count * board.cols_count * sizeof(CellState));
+                        }
+                        break;
+                    } else {
+                        if (DEBUG) printf("[%d] Enqueueing solution\n", rank);
+                        #pragma omp critical
+                        {
+                            enqueue(&solution_queue, &current);
+                        }
+                    }
+                } else {
+                    if (DEBUG) printf("One solution space ended\n");
+                }
             }
         }
     }
 
-    return false;
+    return terminated;
 }
+
 
 int main(int argc, char** argv) {
 
@@ -237,7 +206,7 @@ int main(int argc, char** argv) {
         Initialize the backtracking variables
     */
     
-    board = pruned;
+    memcpy(board.solution, pruned.solution, board.rows_count * board.cols_count * sizeof(CellState));
     initializeQueue(&solution_queue);
 
     /*
@@ -256,14 +225,15 @@ int main(int argc, char** argv) {
     double recursive_end_time = omp_get_wtime();
 
     print_board("Pruned solution", pruned, SOLUTION);
-
         
     printf("Time for pruning part: %f\n", pruning_end_time - pruning_start_time);
     
-    printf(" Time for recursive part: %f\n", recursive_end_time - recursive_start_time);
+    printf("Time for recursive part: %f\n", recursive_end_time - recursive_start_time);
     
     if (solution_found) {
         write_solution(board);
         print_board("Solution found", board, SOLUTION);
     }
+
+    return 0;
 }

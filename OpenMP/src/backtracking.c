@@ -61,49 +61,49 @@ bool build_leaf(Board board, BCB* block, int uk_x, int uk_y, int **unknown_index
     return false;
 }
 
-// bool next_leaf(Board board, BCB *block, int **unknown_index, int **unknown_index_length, int *total_processes_in_solution_space, int *solutions_to_skip) {
-//     int i, j, board_y_index;
-//     CellState cell_state;
+bool next_leaf(Board board, BCB *block, int **unknown_index, int **unknown_index_length, int *total_processes_in_solution_space, int *solutions_to_skip) {
+    int i, j, board_y_index;
+    CellState cell_state;
 
-//     /* if (!block->solution_space_unknowns[0] || !block->solution_space_unknowns[15] || !block->solution_space_unknowns[16]) {
-//         printf("[Next leaf] Error in solution space unknowns\n");
-//     } */
+    /* if (!block->solution_space_unknowns[0] || !block->solution_space_unknowns[15] || !block->solution_space_unknowns[16]) {
+        printf("[Next leaf] Error in solution space unknowns\n");
+    } */
 
-//     // find next white cell iterating unknowns from bottom
-//     for (i = board.rows_count - 1; i >= 0; i--) {
-//         for (j = (*unknown_index_length)[i] - 1; j >= 0; j--) {
-//             board_y_index = (*unknown_index)[i * board.cols_count + j];
-//             cell_state = block->solution[i * board.cols_count + board_y_index];
+    // find next white cell iterating unknowns from bottom
+    for (i = board.rows_count - 1; i >= 0; i--) {
+        for (j = (*unknown_index_length)[i] - 1; j >= 0; j--) {
+            board_y_index = (*unknown_index)[i * board.cols_count + j];
+            cell_state = block->solution[i * board.cols_count + board_y_index];
 
-//             if (block->solution_space_unknowns[i * board.cols_count + j]) {
-//                 if (block->solution[i * board.cols_count + board_y_index] == UNKNOWN){
-//                     printf("[Next leaf] Solution space set unknown is unknown\n");
-//                     exit(-1);
-//                 }
-//                 return false;
-//             }
+            if (block->solution_space_unknowns[i * board.cols_count + j]) {
+                if (block->solution[i * board.cols_count + board_y_index] == UNKNOWN){
+                    printf("[Next leaf] Solution space set unknown is unknown\n");
+                    exit(-1);
+                }
+                return false;
+            }
 
-//             if (cell_state == UNKNOWN) {
-//                 printf("\n\n\n\n\n\n\nCell is unknown\n");
-//                 // print_block("Block", block);
-//                 printf("Unknown index: %d %d\n\n\n\n\n\n", i, board_y_index);
-//                 // exit(-1);
-//                 return false;
-//             }
+            if (cell_state == UNKNOWN) {
+                printf("\n\n\n\n\n\n\nCell is unknown\n");
+                // print_block("Block", block);
+                printf("Unknown index: %d %d\n\n\n\n\n\n", i, board_y_index);
+                // exit(-1);
+                return false;
+            }
 
-//             if (cell_state == WHITE) {
-//                 if (is_cell_state_valid(board, block, i, board_y_index, BLACK)) {
-//                     block->solution[i * board.cols_count + board_y_index] = BLACK;
-//                     if(build_leaf(board, block, i, j + 1, unknown_index, unknown_index_length, total_processes_in_solution_space, solutions_to_skip))
-//                         return true;
-//                 }
-//             }
+            if (cell_state == WHITE) {
+                if (is_cell_state_valid(board, block, i, board_y_index, BLACK)) {
+                    block->solution[i * board.cols_count + board_y_index] = BLACK;
+                    if(build_leaf(board, block, i, j + 1, unknown_index, unknown_index_length, total_processes_in_solution_space, solutions_to_skip))
+                        return true;
+                }
+            }
 
-//             block->solution[i * board.cols_count + board_y_index] = UNKNOWN;
-//         }
-//     }
-//     return false;
-// }
+            block->solution[i * board.cols_count + board_y_index] = UNKNOWN;
+        }
+    }
+    return false;
+}
 
 void init_solution_space(Board board, BCB* block, int solution_space_id, int **unknown_index) {
     

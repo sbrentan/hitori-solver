@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <omp.h>
 
 #include "../include/pruning.h"
 #include "../include/board.h"
