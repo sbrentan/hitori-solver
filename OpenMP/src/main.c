@@ -65,8 +65,7 @@ bool hitori_openmp_solution() {
                 bool leaf_found = build_leaf(board, &blocks[i], 0, 0, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
                 if (DEBUG) printf("[%d] Leaf built for solution space %d\n", rank, my_solution_spaces[i]);
                 if (leaf_found) {
-                    // TODO: parallelize? NO
-                    bool solution_found = check_hitori_conditions(board, &blocks[i]);
+                    bool solution_found = bfs_white_cells_connected(board, &blocks[i], my_threads);
                     if (solution_found) {
                         if (DEBUG) printf("[%d] Solution found on building\n", rank);
                         // TODO: do this pragmas block all threads or just the threads created by the last pragma?
@@ -118,8 +117,7 @@ bool hitori_openmp_solution() {
                 if (DEBUG) printf("[%d] Next leaf found %d\n", rank, leaf_found);
 
                 if (leaf_found) {
-                    // TODO: parallelize
-                    bool solution_found = check_hitori_conditions(board, &current);
+                    bool solution_found = bfs_white_cells_connected(board, &current, my_threads);
                     if (solution_found) {
                         if (DEBUG) printf("[%d] Solution found\n", rank);
                         #pragma omp critical
@@ -147,6 +145,8 @@ bool hitori_openmp_solution() {
 
 
 int main(int argc, char** argv) {
+    
+    omp_set_nested(1);  // TODO: remove?
 
     /*
         Read the board from the input file

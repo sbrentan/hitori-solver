@@ -7,6 +7,7 @@
 
 cd $PBS_O_WORKDIR
 
+export OMP_NESTED=TRUE
 export OMP_NUM_THREADS=1
 
-./build/main.out test-25x25.txt
+./build/main.out input-9x9.txt
