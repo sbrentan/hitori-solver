@@ -49,6 +49,7 @@ bool hitori_openmp_solution() {
         int my_threads = max_threads / initial_threads;
         int remaining_threads = max_threads % initial_threads;
         if (rank < remaining_threads) my_threads++;
+        printf("[%d] My threads: %d\n", rank, my_threads);
 
         BCB blocks[SOLUTION_SPACES];
         if (DEBUG) printf("[%d] Before initialize solution spaces\n", rank);
@@ -92,6 +93,7 @@ bool hitori_openmp_solution() {
         // terminated = true;
         bool current_found;
         
+
         while(!terminated) {
             if (!isEmpty(&solution_queue)) {
                 BCB current;
@@ -119,7 +121,6 @@ bool hitori_openmp_solution() {
                 if (leaf_found) {
                     bool solution_found = bfs_white_cells_connected(board, &current, my_threads);
                     if (solution_found) {
-                        if (DEBUG) printf("[%d] Solution found\n", rank);
                         #pragma omp critical
                         {
                             terminated = true;
@@ -136,6 +137,10 @@ bool hitori_openmp_solution() {
                 } else {
                     if (DEBUG) printf("One solution space ended\n");
                 }
+            } else {
+
+                // TODO: remove or change
+                break;
             }
         }
     }
