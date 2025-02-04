@@ -43,7 +43,6 @@ bool bfs_white_cells_connected(Board board, BCB *block, int threads_available) {
     const int starting_position_three_threads[3][2] = {{0, 0}, {board.rows_count / 2, board.cols_count - 1}, {board.rows_count - 1, 0}};
     const int starting_position_four_threads[4][2] = {{0, 0}, {0, board.cols_count - 1}, {board.rows_count - 1, 0}, {board.rows_count - 1, board.cols_count - 1}};
 
-    // int threads_available = 2;  // TODO: add parameter
     int starting_positions[4][2];
     switch (threads_available) {
         case 1:
@@ -81,9 +80,12 @@ bool bfs_white_cells_connected(Board board, BCB *block, int threads_available) {
         visited[starting_positions[i][0] * board.cols_count + starting_positions[i][1]] = i + 1;
     visited_count += threads_available;
     
-    omp_lock_t locks[board_size];
-    for (i = 0; i < board_size; i++)
-        omp_init_lock(&locks[i]);
+    // omp_lock_t locks[board_size];
+    // for (i = 0; i < board_size; i++)
+    //     omp_init_lock(&locks[i]);
+
+    omp_lock_t lock;
+    omp_init_lock(&lock);
 
     #pragma omp parallel num_threads(threads_available) reduction(+:visited_count) private(i)
     {
@@ -93,8 +95,9 @@ bool bfs_white_cells_connected(Board board, BCB *block, int threads_available) {
         int col = starting_positions[tid][1];
         int queue_x[board_size], queue_y[board_size];
         int front = 0, back = 0;
-        bool row_in_bounds, col_in_bounds, enqueued;
+        bool row_in_bounds, col_in_bounds, is_visited;
         int new_row, new_col, new_index, cur_x, cur_y;
+        
 
         // Enqueue the starting cell
         queue_x[back] = row;
@@ -130,16 +133,16 @@ bool bfs_white_cells_connected(Board board, BCB *block, int threads_available) {
                         // Visit the new cell
                         // TODO: change to lock?
 
-                        enqueued = false;
-                        omp_set_lock(&locks[new_index]);
+                        is_visited = false;
+                        omp_set_lock(&lock);
                         if (!visited[new_index]) {
                             visited[new_index] = tid + 1;
                             visited_count++; // Increment the total visited cells count
-                            enqueued = true;
+                            is_visited = true;
                         }
-                        omp_unset_lock(&locks[new_index]);
+                        omp_unset_lock(&lock);
                         
-                        if (enqueued) {
+                        if (is_visited) {
                             // Enqueue the new white cell
                             if (block->solution[new_index] == WHITE) {
                                 queue_x[back] = new_row;
@@ -151,10 +154,13 @@ bool bfs_white_cells_connected(Board board, BCB *block, int threads_available) {
             }
         }
     }
+    omp_destroy_lock(&lock);
 
-    for (i = 0; i < board_size; i++)
-        omp_destroy_lock(&locks[i]);
+    // for (i = 0; i < board_size; i++)
+    //     omp_destroy_lock(&locks[i]);
     
+    if (visited_count != board_size) return false;
+
     bool visited_threads[threads_available];
     memset(visited_threads, false, threads_available * sizeof(bool));
     int thread_queue[threads_available];
@@ -176,5 +182,5 @@ bool bfs_white_cells_connected(Board board, BCB *block, int threads_available) {
         }
     }
 
-    return visited_count == board_size && threads_count == threads_available;
+    return threads_count == threads_available;
 }

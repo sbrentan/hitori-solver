@@ -138,6 +138,9 @@ Board combine_boards(Board first_board, Board second_board, bool forced, char *t
     rows = first_board.rows_count;
     cols = first_board.cols_count;
 
+    printf("combining\n");
+    print_board(technique, first_board, SOLUTION);
+    print_board(technique, second_board, SOLUTION);
 
     /*
         Initialize the solution board with the values of the original board.
@@ -155,18 +158,21 @@ Board combine_boards(Board first_board, Board second_board, bool forced, char *t
     */
 
     memset(merged.solution, UNKNOWN, rows * cols * sizeof(int));
+
+    print_board("merged", merged, SOLUTION);
+
     int i, j;
-    #pragma omp parallel for collapse(2) private(i,j)
+    
     for (i = 0; i < rows; i++) {
         for (j = 0; j < cols; j++) {
             if (first_board.solution[i * cols + j] == second_board.solution[i * cols + j]) 
                 merged.solution[i * cols + j] = first_board.solution[i * cols + j];
-            else if (!forced && first_board.solution[i * cols + j] == WHITE && second_board.solution[i * cols + j] == UNKNOWN) 
-                merged.solution[i * cols + j] = WHITE;
-            else if (!forced && first_board.solution[i * cols + j] == UNKNOWN && second_board.solution[i * cols + j] == WHITE) 
-                merged.solution[i * cols + j] = WHITE;
-            else if (!forced) 
-                merged.solution[i * cols + j] = BLACK;
+            else if (first_board.solution[i * cols + j] == UNKNOWN && second_board.solution[i * cols + j] != UNKNOWN) 
+                merged.solution[i * cols + j] = second_board.solution[i * cols + j];
+            else if (first_board.solution[i * cols + j] != UNKNOWN && second_board.solution[i * cols + j] == UNKNOWN) 
+                merged.solution[i * cols + j] = first_board.solution[i * cols + j];
+            else
+                merged.solution[i * cols + j] = UNKNOWN;
         }   
     }
 

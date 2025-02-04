@@ -573,8 +573,21 @@ int main(int argc, char** argv) {
 
     double pruning_start_time = MPI_Wtime();
     Board pruned = techniques[0](board, rank, size);
-    for (i = 1; i < num_techniques; i++)
+    print_board("------", pruned, SOLUTION);
+
+    for (i = 1; i < num_techniques; i++) {
+        // Board partial = techniques[i](pruned, rank, size);
+
+        // char *name = malloc(20 * sizeof(char));
+        // sprintf(name, "Partial %d", i);
+
+        // print_board(name, partial, SOLUTION);
+
         pruned = combine_boards(pruned, techniques[i](pruned, rank, size), false, rank, "Partial");
+        print_board("------", pruned, SOLUTION);
+    }
+
+    // print_board("Pruned", pruned, SOLUTION);
     
     /*
         Repeat the whiting and blacking pruning techniques until the solution doesn't change
@@ -594,6 +607,9 @@ int main(int argc, char** argv) {
             break;
     }
     double pruning_end_time = MPI_Wtime();
+
+    print_board("Pruned solution", pruned, SOLUTION);
+    return 0;
 
     /*
         Initialize the backtracking variables

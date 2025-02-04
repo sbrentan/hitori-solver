@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <omp.h>
 
@@ -16,60 +17,39 @@ Board openmp_uniqueness_rule(Board board) {
     */
 
     int i, j, k;
+    bool unique;
     
-    int row_solution[board.rows_count * board.cols_count];
-    int col_solution[board.rows_count * board.cols_count];
-
-    memset(row_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
-    memset(col_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
-
-    #pragma omp parallel for private(i, j, k) collapse(2) schedule(static)
+    int uniqueness_solution[board.rows_count * board.cols_count];
+    memset(uniqueness_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
+    
     for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
-            bool unique = true;
-            int value = board.grid[i * board.cols_count + j];
 
+            int current_value = board.grid[i * board.cols_count + j];
+
+            unique = true;
             for (k = 0; k < board.cols_count; k++) {
-                if (j != k && value == board.grid[i * board.cols_count + k]) {
+                if (j != k && current_value == board.grid[i * board.cols_count + k]) {
                     unique = false;
                     break;
                 }
             }
 
-            if (unique)
-                row_solution[i * board.cols_count + j] = WHITE; // If the value is unique, mark it as white
-            else
-                row_solution[i * board.cols_count + j] = UNKNOWN;
-        }
-    }
-
-    #pragma omp parallel for private(i, j, k) collapse(2) schedule(static)
-    for (i = 0; i < board.rows_count; i++) {// j = 1 i = 0
-        for (j = 0; j < board.cols_count; j++) {
-            bool unique = true;
-            int value = board.grid[j * board.rows_count + i];
-
-            for (k = 0; k < board.rows_count; k++) {
-                if (j != k && value == board.grid[k * board.rows_count + i]) {
-                    unique = false;
-                    break;
+            if (unique) {
+                for (k = 0; k < board.rows_count; k++) {
+                    if (i != k && current_value == board.grid[k * board.rows_count + j]) {
+                        unique = false;
+                        break;
+                    }
                 }
-            }
 
-            if (unique)
-                col_solution[j * board.rows_count + i] = WHITE; // If the value is unique, mark it as white
-            else
-                col_solution[j * board.rows_count + i] = UNKNOWN;
+                if (unique)
+                    uniqueness_solution[i * board.cols_count + j] = WHITE; // If the value is unique, mark it as white
+            }
         }
     }
 
-
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = { board.grid, board.rows_count, board.cols_count, col_solution };
-
-    Board solution = combine_boards(row_board, col_board, true, "Uniqueness Rule");
-
-    return solution;
+    return (Board){ board.grid, board.rows_count, board.cols_count, uniqueness_solution };
 }
 
 Board openmp_sandwich_rules(Board board) {
@@ -88,68 +68,52 @@ Board openmp_sandwich_rules(Board board) {
 
     int i, j;
 
-    int row_solution[board.rows_count * board.cols_count];
-    int col_solution[board.rows_count * board.cols_count];
+    int *sandwich_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    memset(sandwich_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
 
-    memset(row_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
-    memset(col_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
-
-    #pragma omp parallel for private(i, j) collapse(2) schedule(static)
     for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
             if (j < board.cols_count - 2) {
+
                 int value1 = board.grid[i * board.cols_count + j];
                 int value2 = board.grid[i * board.cols_count + j + 1];
                 int value3 = board.grid[i * board.cols_count + j + 2];
 
                 if (value1 == value2 && value2 == value3) {
-                    row_solution[i * board.cols_count + j] = BLACK;
-                    row_solution[i * board.cols_count + j + 1] = WHITE;
-                    row_solution[i * board.cols_count + j + 2] = BLACK;
+                    sandwich_solution[i * board.cols_count + j] = BLACK;
+                    sandwich_solution[i * board.cols_count + j + 1] = WHITE;
+                    sandwich_solution[i * board.cols_count + j + 2] = BLACK;
 
-                    if (j - 1 >= 0) row_solution[i * board.cols_count + j - 1] = WHITE;
-                    if (j + 3 < board.cols_count) row_solution[i * board.cols_count + j + 3] = WHITE;
+                    if (j - 1 >= 0) sandwich_solution[i * board.cols_count + j - 1] = WHITE;
+                    if (j + 3 < board.cols_count) sandwich_solution[i * board.cols_count + j + 3] = WHITE;
 
                 } else if (value1 != value2 && value1 == value3) {
-                    row_solution[i * board.cols_count + j] = UNKNOWN;
-                    row_solution[i * board.cols_count + j + 1] = WHITE;
-                    row_solution[i * board.cols_count + j + 2] = UNKNOWN;
+                    sandwich_solution[i * board.cols_count + j + 1] = WHITE;
                 }
             }
-        }
-    }
 
-    #pragma omp parallel for private(i, j) collapse(2) schedule(static)
-    for (i = 0; i < board.rows_count; i++) {
-        for (j = 0; j < board.cols_count; j++) {
             if (i < board.rows_count - 2) {
-                int value1 = board.grid[j * board.rows_count + i];
-                int value2 = board.grid[(j+1)* board.rows_count + i];
-                int value3 = board.grid[(j+2) * board.rows_count + i];
+
+                int value1 = board.grid[i * board.cols_count + j];
+                int value2 = board.grid[(i + 1) * board.cols_count + j];
+                int value3 = board.grid[(i + 2) * board.cols_count + j];
 
                 if (value1 == value2 && value2 == value3) {
-                    col_solution[j * board.rows_count + i] = BLACK;
-                    col_solution[(j+1) * board.rows_count + i] = WHITE;
-                    col_solution[(j+2) * board.rows_count + i] = BLACK;
+                    sandwich_solution[i * board.cols_count + j] = BLACK;
+                    sandwich_solution[(i + 1) * board.cols_count + j] = WHITE;
+                    sandwich_solution[(i + 2) * board.cols_count + j] = BLACK;
 
-                    if (j - 1 >= 0) col_solution[(j-1) * board.rows_count + i] = WHITE;
-                    if (j + 3 < board.rows_count) col_solution[(j+3) * board.rows_count + i] = WHITE;
+                    if (i - 1 >= 0) sandwich_solution[(i - 1) * board.cols_count + j] = WHITE;
+                    if (i + 3 < board.rows_count) sandwich_solution[(i + 3) * board.cols_count + j] = WHITE;
 
                 } else if (value1 != value2 && value1 == value3) {
-                    col_solution[j * board.rows_count + i] = UNKNOWN;
-                    col_solution[(j+1) * board.rows_count + i] = WHITE;
-                    col_solution[(j+2) * board.rows_count + i] = UNKNOWN;
+                    sandwich_solution[(i + 1) * board.cols_count + j] = WHITE;
                 }
             }
         }
     }
 
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = { board.grid, board.rows_count, board.cols_count, col_solution };
-
-    Board solution = combine_boards(row_board, col_board, false, "Sandwich Rules");
-
-    return solution;
+    return (Board){ board.grid, board.rows_count, board.cols_count, sandwich_solution };
 }
 
 Board openmp_pair_isolation(Board board) {
@@ -162,15 +126,11 @@ Board openmp_pair_isolation(Board board) {
         e.g. 2 2 ... 2 ... 2 --> 2 2 ... X ... X
     */
 
-    int i, j;
+    int i, j, k;
 
-    int row_solution[board.rows_count * board.cols_count];
-    int col_solution[board.rows_count * board.cols_count];
+    int *pair_isolation_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    memset(pair_isolation_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
 
-    memset(row_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
-    memset(col_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
-
-    #pragma omp parallel for private(i, j) collapse(2) schedule(static)
     for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
             if (j < board.cols_count - 1) {
@@ -179,7 +139,6 @@ Board openmp_pair_isolation(Board board) {
 
                 if (value1 == value2) {
                     // Found a pair of values next to each other, mark all the other single values as black
-                    int k;
                     for (k = 0; k < board.cols_count; k++) {
                         int single = board.grid[i * board.cols_count + k];
                         bool isolated = true;
@@ -191,43 +150,37 @@ Board openmp_pair_isolation(Board board) {
                             if (k + 1 < board.cols_count && board.grid[i * board.cols_count + k + 1] == single) isolated = false;
 
                             if (isolated) {
-                                row_solution[i * board.cols_count + k] = BLACK;
+                                pair_isolation_solution[i * board.cols_count + k] = BLACK;
 
-                                if (k - 1 >= 0) row_solution[i * board.cols_count + k - 1] = WHITE;
-                                if (k + 1 < board.cols_count) row_solution[i * board.cols_count + k + 1] = WHITE;
+                                if (k - 1 >= 0) pair_isolation_solution[i * board.cols_count + k - 1] = WHITE;
+                                if (k + 1 < board.cols_count) pair_isolation_solution[i * board.cols_count + k + 1] = WHITE;
                             }
                         }
                     }
                 }
             }
-        }
-    }
-
-    #pragma omp parallel for private(i, j) collapse(2) schedule(static)
-    for (i = 0; i < board.rows_count; i++) {
-        for (j = 0; j < board.cols_count; j++) {
+            
             if (i < board.rows_count - 1) {
-                int value1 = board.grid[j * board.rows_count + i];
-                int value2 = board.grid[(j+1) * board.rows_count + i];
+                int value1 = board.grid[i * board.rows_count + j];
+                int value2 = board.grid[(i + 1) * board.rows_count + j];
 
                 if (value1 == value2) {
                     // Found a pair of values next to each other, mark all the other single values as black
-                    int k;
                     for (k = 0; k < board.rows_count; k++) {
-                        int single = board.grid[k * board.rows_count + i];
+                        int single = board.grid[k * board.rows_count + j];
                         bool isolated = true;
 
-                        if (k != j && k != j + 1 && single == value1) {
+                        if (k != i && k != i + 1 && single == value1) {
 
                             // Check if the value is isolated
-                            if (k - 1 >= 0 && board.grid[(k-1) * board.rows_count + i] == single) isolated = false;
-                            if (k + 1 < board.rows_count && board.grid[(k+1) * board.rows_count + i] == single) isolated = false;
+                            if (k - 1 >= 0 && board.grid[(k - 1) * board.rows_count + j] == single) isolated = false;
+                            if (k + 1 < board.rows_count && board.grid[(k + 1) * board.rows_count + j] == single) isolated = false;
 
                             if (isolated) {
-                                col_solution[k * board.rows_count + i] = BLACK;
+                                pair_isolation_solution[k * board.rows_count + j] = BLACK;
 
-                                if (k - 1 >= 0) col_solution[(k-1) * board.rows_count + i] = WHITE;
-                                if (k + 1 < board.rows_count) col_solution[(k+1) * board.rows_count + i] = WHITE;
+                                if (k - 1 >= 0) pair_isolation_solution[(k - 1) * board.rows_count + j] = WHITE;
+                                if (k + 1 < board.rows_count) pair_isolation_solution[(k + 1) * board.rows_count + j] = WHITE;
                             }
                         }
                     }
@@ -236,12 +189,7 @@ Board openmp_pair_isolation(Board board) {
         }
     }
 
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = { board.grid, board.rows_count, board.cols_count, col_solution };
-
-    Board solution = combine_boards(row_board, col_board, false, "Pair Isolation");
-
-    return solution;
+    return (Board){ board.grid, board.rows_count, board.cols_count, pair_isolation_solution };
 
 }
 
@@ -255,15 +203,11 @@ Board openmp_flanked_isolation(Board board) {
         e.g. 2 3 3 2 ... 2 ... 3 --> 2 3 3 2 ... X ... X
     */
 
-    int i, j;
+    int i, j, k;
 
-    int row_solution[board.rows_count * board.cols_count];
-    int col_solution[board.rows_count * board.cols_count];
-
-    memset(row_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
-    memset(col_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
+    int *flanked_isolation_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    memset(flanked_isolation_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
     
-    #pragma omp parallel for private(i, j) collapse(2) schedule(static)
     for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
             if (j < board.cols_count - 3) {
@@ -273,39 +217,32 @@ Board openmp_flanked_isolation(Board board) {
                 int value4 = board.grid[i * board.cols_count + j + 3];
 
                 if (value1 == value4 && value2 == value3 && value1 != value2) {
-                    int k;
                     for (k = 0; k < board.cols_count; k++) {
                         int single = board.grid[i * board.cols_count + k];
                         if (k != j && k != j + 1 && k != j + 2 && k != j + 3 && (single == value1 || single == value2)) {
-                            row_solution[i * board.cols_count + k] = BLACK;
+                            flanked_isolation_solution[i * board.cols_count + k] = BLACK;
 
-                            if (k - 1 >= 0) row_solution[i * board.cols_count + k - 1] = WHITE;
-                            if (k + 1 < board.cols_count) row_solution[i * board.cols_count + k + 1] = WHITE;
+                            if (k - 1 >= 0) flanked_isolation_solution[i * board.cols_count + k - 1] = WHITE;
+                            if (k + 1 < board.cols_count) flanked_isolation_solution[i * board.cols_count + k + 1] = WHITE;
                         }
                     }
                 }
             }
-        }
-    }
-
-    #pragma omp parallel for private(i, j) collapse(2) schedule(static)
-    for (i = 0; i < board.rows_count; i++) {
-        for (j = 0; j < board.cols_count; j++) {
+            
             if (i < board.rows_count - 3) {
-                int value1 = board.grid[j * board.rows_count + i];
-                int value2 = board.grid[(j+1) * board.rows_count + i];
-                int value3 = board.grid[(j+2) * board.rows_count + i];
-                int value4 = board.grid[(j+3) * board.rows_count + i];
+                int value1 = board.grid[i * board.rows_count + j];
+                int value2 = board.grid[(i + 1) * board.rows_count + j];
+                int value3 = board.grid[(i + 2) * board.rows_count + j];
+                int value4 = board.grid[(i + 3) * board.rows_count + j];
 
                 if (value1 == value4 && value2 == value3 && value1 != value2) {
-                    int k;
                     for (k = 0; k < board.rows_count; k++) {
-                        int single = board.grid[k * board.rows_count + i];
-                        if (k != j && k != j + 1 && k != j + 2 && k != j + 3 && (single == value1 || single == value2)) {
-                            col_solution[k * board.rows_count + i] = BLACK;
+                        int single = board.grid[k * board.rows_count + j];
+                        if (k != i && k != i + 1 && k != i + 2 && k != i + 3 && (single == value1 || single == value2)) {
+                            flanked_isolation_solution[k * board.rows_count + j] = BLACK;
 
-                            if (k - 1 >= 0) col_solution[(k-1) * board.rows_count + i] = WHITE;
-                            if (k + 1 < board.rows_count) col_solution[(k+1) * board.rows_count + i] = WHITE;
+                            if (k - 1 >= 0) flanked_isolation_solution[(k - 1) * board.rows_count + j] = WHITE;
+                            if (k + 1 < board.rows_count) flanked_isolation_solution[(k + 1) * board.rows_count + j] = WHITE;
                         }
                     }
                 }
@@ -313,12 +250,7 @@ Board openmp_flanked_isolation(Board board) {
         }
     }
 
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = { board.grid, board.rows_count, board.cols_count, col_solution };
-
-    Board solution = combine_boards(row_board, col_board, false, "Flanked Isolation");
-
-    return solution;
+    return (Board){ board.grid, board.rows_count, board.cols_count, flanked_isolation_solution };
 }
 
 void compute_corner(Board board, int x, int y, CornerType corner_type, int **local_corner_solution) {
@@ -327,8 +259,10 @@ void compute_corner(Board board, int x, int y, CornerType corner_type, int **loc
         Set the local board to work with the corner
     */
 
-    *local_corner_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
-    memset(*local_corner_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
+    int board_size = board.rows_count * board.cols_count;
+
+    *local_corner_solution = (int *) malloc(board_size * sizeof(int));
+    memset(*local_corner_solution, UNKNOWN, board_size * sizeof(int));
 
     /*
         Get the values of the corner cells based on the corner indexes (x, y):
@@ -469,87 +403,89 @@ Board openmp_corner_cases(Board board) {
             2) Four processes to compute each corner (if 4 or more processes)
     */
 
-    int *local_corner_solution;
-    int *solutions = (int *) malloc(4 * board.rows_count * board.cols_count * sizeof(int));
+    int rows = board.rows_count;
+    int cols = board.cols_count;
+    int board_size = rows * cols;
+
+    int *solutions = (int *) malloc(4 * board_size * sizeof(int));
+
+    int top_left_x = 0;
+    int top_left_y = cols;
+
+    int top_right_x = cols - 2;
+    int top_right_y = 2 * cols - 2;
+
+    int bottom_left_x = (rows - 2) * cols;
+    int bottom_left_y = (rows - 1) * cols;
+
+    int bottom_right_x = (rows - 2) * cols + cols - 2;
+    int bottom_right_y = (rows - 1) * cols + cols - 2;
 
     #pragma omp parallel
-    {   
+    {
         int size = omp_get_num_threads();
         int rank = omp_get_thread_num();
 
-        int top_left_x = 0;
-        int top_left_y = board.cols_count;
-
-        int top_right_x = board.cols_count - 2;
-        int top_right_y = 2 * board.cols_count - 2;
-
-        int bottom_left_x = (board.rows_count - 2) * board.cols_count;
-        int bottom_left_y = (board.rows_count - 1) * board.cols_count;
-
-        int bottom_right_x = (board.rows_count - 2) * board.cols_count + board.cols_count - 2;
-        int bottom_right_y = (board.rows_count - 1) * board.cols_count + board.cols_count - 2;
+        int *local_corner_solution;
         
         switch (size) {
             case 1:
                 compute_corner(board, top_left_x, top_left_y, TOP_LEFT, &local_corner_solution);
-                memcpy(solutions, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                memcpy(solutions, local_corner_solution, board_size * sizeof(int));
                 compute_corner(board, top_right_x, top_right_y, TOP_RIGHT, &local_corner_solution);
-                memcpy(solutions + board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                memcpy(solutions + board_size, local_corner_solution, board_size * sizeof(int));
                 compute_corner(board, bottom_left_x, bottom_left_y, BOTTOM_LEFT, &local_corner_solution);
-                memcpy(solutions + 2 * board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                memcpy(solutions + 2 * board_size, local_corner_solution, board_size * sizeof(int));
                 compute_corner(board, bottom_right_x, bottom_right_y, BOTTOM_RIGHT, &local_corner_solution);
-                memcpy(solutions + 3 * board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                memcpy(solutions + 3 * board_size, local_corner_solution, board_size * sizeof(int));
                 break;
             case 2:
             case 3:
                 if (rank == 0) {
                     compute_corner(board, top_left_x, top_left_y, TOP_LEFT, &local_corner_solution);
-                    memcpy(solutions, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                    memcpy(solutions, local_corner_solution, board_size * sizeof(int));
                     compute_corner(board, top_right_x, top_right_y, TOP_RIGHT, &local_corner_solution);
-                    memcpy(solutions + board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                    memcpy(solutions + board_size, local_corner_solution, board_size * sizeof(int));
                 } else if (rank == 1) {
                     compute_corner(board, bottom_left_x, bottom_left_y, BOTTOM_LEFT, &local_corner_solution);
-                    memcpy(solutions + 2 * board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                    memcpy(solutions + 2 * board_size, local_corner_solution, board_size * sizeof(int));
                     compute_corner(board, bottom_right_x, bottom_right_y, BOTTOM_RIGHT, &local_corner_solution);
-                    memcpy(solutions + 3 * board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                    memcpy(solutions + 3 * board_size, local_corner_solution, board_size * sizeof(int));
                 }
                 break;
             default:
                 switch (rank) {
                     case 0:
                         compute_corner(board, top_left_x, top_left_y, TOP_LEFT, &local_corner_solution);
-                        memcpy(solutions, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                        memcpy(solutions, local_corner_solution, board_size * sizeof(int));
                         break;
                     case 1:
                         compute_corner(board, top_right_x, top_right_y, TOP_RIGHT, &local_corner_solution);
-                        memcpy(solutions + board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                        memcpy(solutions + board_size, local_corner_solution, board_size * sizeof(int));
                         break;
                     case 2:
                         compute_corner(board, bottom_left_x, bottom_left_y, BOTTOM_LEFT, &local_corner_solution);
-                        memcpy(solutions + 2 * board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                        memcpy(solutions + 2 * board_size, local_corner_solution, board_size * sizeof(int));
                         break;
                     case 3:
                         compute_corner(board, bottom_right_x, bottom_right_y, BOTTOM_RIGHT, &local_corner_solution);
-                        memcpy(solutions + 3 * board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
+                        memcpy(solutions + 3 * board_size, local_corner_solution, board_size * sizeof(int));
                         break;
                 }
                 break;
-            
-            free(local_corner_solution);
         }
+
+        free(local_corner_solution);
     }
 
     /*
         Combine the partial solutions
     */
 
-    int rows = board.rows_count;
-    int cols = board.cols_count;
-
-    Board top_left_board = { board.grid, board.rows_count, board.cols_count, solutions };
-    Board top_right_board = { board.grid, board.rows_count, board.cols_count, solutions + rows * cols };
-    Board bottom_left_board = { board.grid, board.rows_count, board.cols_count, solutions + 2 * rows * cols };
-    Board bottom_right_board = { board.grid, board.rows_count, board.cols_count, solutions + 3 * rows * cols };
+    Board top_left_board = { board.grid, rows, cols, solutions };
+    Board top_right_board = { board.grid, rows, cols, solutions + board_size };
+    Board bottom_left_board = { board.grid, rows, cols, solutions + 2 * board_size };
+    Board bottom_right_board = { board.grid, rows, cols, solutions + 3 * board_size };
 
     Board top_corners_board = combine_boards(top_left_board, top_right_board, false, "Top Corner Cases");
     Board bottom_corners_board = combine_boards(bottom_left_board, bottom_right_board, false, "Bottom Corner Cases");
@@ -571,56 +507,38 @@ Board openmp_set_white(Board board) {
         e.g. Suppose a whited 3. Then 2 O ... 3 --> 2 O ... X
     */
 
-    int i, j;
+    int i, j, k;
 
-    int row_solution[board.rows_count * board.cols_count];
-    int col_solution[board.rows_count * board.cols_count];
+    int *set_white_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));    
+    memset(set_white_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
 
-    memset(row_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
-    memset(col_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
-
-    #pragma omp parallel for private(i, j) collapse(2) schedule(static)
     for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
             if (board.solution[i * board.cols_count + j] == WHITE) {
                 int value = board.grid[i * board.cols_count + j];
-                int k;
+                
                 for (k = 0; k < board.cols_count; k++) {
                     if (board.grid[i * board.cols_count + k] == value && k != j) {
-                        row_solution[i * board.cols_count + k] = BLACK;
+                        set_white_solution[i * board.cols_count + k] = BLACK;
 
-                        if (k - 1 >= 0) row_solution[i * board.cols_count + k - 1] = WHITE;
-                        if (k + 1 < board.cols_count) row_solution[i * board.cols_count + k + 1] = WHITE;
+                        if (k - 1 >= 0) set_white_solution[i * board.cols_count + k - 1] = WHITE;
+                        if (k + 1 < board.cols_count) set_white_solution[i * board.cols_count + k + 1] = WHITE;
                     }
                 }
-            }
-        }
-    }
 
-    #pragma omp parallel for private(i, j) collapse(2) schedule(static)
-    for (i = 0; i < board.rows_count; i++) {
-        for (j = 0; j < board.cols_count; j++) {
-            if (board.solution[j * board.rows_count + i] == WHITE) {
-                int value = board.grid[j * board.rows_count + i];
-                int k;
                 for (k = 0; k < board.rows_count; k++) {
-                    if (board.grid[k * board.rows_count + i] == value && k != j) {
-                        col_solution[k * board.rows_count + i] = BLACK;
+                    if (board.grid[k * board.rows_count + j] == value && k != i) {
+                        set_white_solution[k * board.rows_count + j] = BLACK;
 
-                        if (k - 1 >= 0) col_solution[(k-1) * board.rows_count + i] = WHITE;
-                        if (k + 1 < board.rows_count) col_solution[(k+1) * board.rows_count + i] = WHITE;
+                        if (k - 1 >= 0) set_white_solution[(k - 1) * board.rows_count + j] = WHITE;
+                        if (k + 1 < board.rows_count) set_white_solution[(k + 1) * board.rows_count + j] = WHITE;
                     }
                 }
             }
         }
     }
 
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = { board.grid, board.rows_count, board.cols_count, col_solution };
-
-    Board solution = combine_boards(row_board, col_board, false, "Set White");
-
-    return solution;
+    return (Board){ board.grid, board.rows_count, board.cols_count, set_white_solution };
 }
 
 Board openmp_set_black(Board board) {
@@ -635,36 +553,20 @@ Board openmp_set_black(Board board) {
 
     int i, j;
 
-    int row_solution[board.rows_count * board.cols_count];
-    int col_solution[board.rows_count * board.cols_count];
+    int *set_black_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    memset(set_black_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
 
-    memset(row_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
-    memset(col_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
-
-    #pragma omp parallel for private(i, j) collapse(2) schedule(static)
     for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
             if (board.solution[i * board.cols_count + j] == BLACK) {
-                if (j - 1 >= 0) row_solution[i * board.cols_count + j - 1] = WHITE;
-                if (j + 1 < board.cols_count) row_solution[i * board.cols_count + j + 1] = WHITE;
+                if (j - 1 >= 0) set_black_solution[i * board.cols_count + j - 1] = WHITE;
+                if (j + 1 < board.cols_count) set_black_solution[i * board.cols_count + j + 1] = WHITE;
+                
+                if (i - 1 >= 0) set_black_solution[(i - 1) * board.rows_count + j ] = WHITE;
+                if (i + 1 < board.rows_count) set_black_solution[(i + 1) * board.rows_count + j ] = WHITE;
             }
         }
     }
 
-    #pragma omp parallel for private(i, j) collapse(2) schedule(static)
-    for (i = 0; i < board.rows_count; i++) {
-        for (j = 0; j < board.cols_count; j++) {
-            if (board.solution[j * board.rows_count + i] == BLACK) {
-                if (j - 1 >= 0) col_solution[(j-1) * board.rows_count + i ] = WHITE;
-                if (j + 1 < board.rows_count) col_solution[(j+1) * board.rows_count + i ] = WHITE;
-            }
-        }
-    }
-
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = { board.grid, board.rows_count, board.cols_count, col_solution };
-
-    Board solution = combine_boards(row_board, col_board, false, "Set Black");
-
-    return solution;
+    return (Board){ board.grid, board.rows_count, board.cols_count, set_black_solution };
 }

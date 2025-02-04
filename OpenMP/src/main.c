@@ -89,6 +89,7 @@ bool hitori_openmp_solution() {
         }
 
         if (DEBUG) printf("[%d] Finished building leaves\n", rank);
+        fflush(stdout);
 
         // terminated = true;
         bool current_found;
@@ -140,7 +141,7 @@ bool hitori_openmp_solution() {
             } else {
 
                 // TODO: remove or change
-                break;
+                // break;
             }
         }
     }
@@ -182,8 +183,21 @@ int main(int argc, char** argv) {
 
     double pruning_start_time = omp_get_wtime();
     Board pruned = techniques[0](board);
-    for (i = 1; i < num_techniques; i++)
+    print_board("------", pruned, SOLUTION);
+
+    for (i = 1; i < num_techniques; i++) {
+        Board partial = techniques[i](pruned);
+        
+        char *name = malloc(20 * sizeof(char));
+        sprintf(name, "Partial %d", i);
+
+        print_board(name, partial, SOLUTION);
+
         pruned = combine_boards(pruned, techniques[i](pruned), false, "Partial");
+        print_board("------", pruned, SOLUTION);
+    }
+
+    print_board("Semi-Pruned", pruned, SOLUTION);
     
     /*
         Repeat the whiting and blacking pruning techniques until the solution doesn't change
@@ -206,6 +220,8 @@ int main(int argc, char** argv) {
     
     printf("Time needed %f\n", pruning_end_time-pruning_start_time);
     print_board("Pruned", pruned, SOLUTION);
+
+    return 0;
 
     /*
         Initialize the backtracking variables
