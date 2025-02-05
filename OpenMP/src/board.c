@@ -48,6 +48,11 @@ void read_board(Board* board, char *filename) {
         exit(1);
     }
 
+    if (rows < 4) {
+        printf("The board must be at least 4x4.\n");
+        exit(1);
+    }
+
     board->grid = (int *) malloc(rows * cols * sizeof(int));
     board->solution = (int *) malloc(rows * cols * sizeof(CellState));
 
@@ -138,10 +143,6 @@ Board combine_boards(Board first_board, Board second_board, bool forced, char *t
     rows = first_board.rows_count;
     cols = first_board.cols_count;
 
-    printf("combining\n");
-    print_board(technique, first_board, SOLUTION);
-    print_board(technique, second_board, SOLUTION);
-
     /*
         Initialize the solution board with the values of the original board.
     */
@@ -158,8 +159,6 @@ Board combine_boards(Board first_board, Board second_board, bool forced, char *t
     */
 
     memset(merged.solution, UNKNOWN, rows * cols * sizeof(int));
-
-    print_board("merged", merged, SOLUTION);
 
     int i, j;
     

@@ -25,6 +25,13 @@ int solutions_to_skip = 0;
 // int total_processes_in_solution_space = 1;
 int *unknown_index, *unknown_index_length;
 
+// ----- Time variables -----
+double backtracking_time = 0;
+double check_time = 0;
+double dfs_time = 0;
+double conditions_time = 0;
+
+
 bool hitori_openmp_solution() {
 
     int max_threads = omp_get_max_threads();
@@ -63,10 +70,17 @@ bool hitori_openmp_solution() {
                 // TODO: Remove threads_in_solution_space and solutions_to_skip if not using them
                 int threads_in_solution_space = 1;
                 if (DEBUG) printf("[%d] Building leaf for solution space %d\n", rank, my_solution_spaces[i]);
+                double backtracking_start_time = MPI_Wtime();
                 bool leaf_found = build_leaf(board, &blocks[i], 0, 0, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
+                backtracking_time += MPI_Wtime() - backtracking_start_time;
                 if (DEBUG) printf("[%d] Leaf built for solution space %d\n", rank, my_solution_spaces[i]);
                 if (leaf_found) {
-                    bool solution_found = bfs_white_cells_connected(board, &blocks[i], my_threads);
+                    // bool solution_found = bfs_white_cells_connected(board, &blocks[i], my_threads);
+
+                    double check_start_time = MPI_Wtime();
+                    bool solution_found = check_hitori_conditions(board, &blocks[i], &dfs_time, &conditions_time);
+                    check_time += MPI_Wtime() - check_start_time;
+
                     if (solution_found) {
                         if (DEBUG) printf("[%d] Solution found on building\n", rank);
                         // TODO: do this pragmas block all threads or just the threads created by the last pragma?
@@ -93,7 +107,7 @@ bool hitori_openmp_solution() {
 
         // terminated = true;
         bool current_found;
-        
+
 
         while(!terminated) {
             if (!isEmpty(&solution_queue)) {
@@ -149,7 +163,6 @@ bool hitori_openmp_solution() {
     return terminated;
 }
 
-
 int main(int argc, char** argv) {
     
     omp_set_nested(1);  // TODO: remove?
@@ -182,27 +195,31 @@ int main(int argc, char** argv) {
     int num_techniques = sizeof(techniques) / sizeof(techniques[0]);
 
     double pruning_start_time = omp_get_wtime();
-    Board pruned = techniques[0](board);
-    print_board("------", pruned, SOLUTION);
 
-    for (i = 1; i < num_techniques; i++) {
-        Board partial = techniques[i](pruned);
-        
-        char *name = malloc(20 * sizeof(char));
-        sprintf(name, "Partial %d", i);
-
-        print_board(name, partial, SOLUTION);
-
-        pruned = combine_boards(pruned, techniques[i](pruned), false, "Partial");
-        print_board("------", pruned, SOLUTION);
+    Board pruned = board;// = techniques[0](board);
+    #pragma omp parallel
+    {
+        #pragma omp single nowait
+        {
+            for (i = 0; i < num_techniques; i++) {
+                #pragma omp task firstprivate(i)
+                {
+                    Board combined = combine_boards(pruned, techniques[i](board), false, "Partial");
+                        
+                    #pragma omp critical
+                    {
+                        pruned = combined;
+                    }
+                }
+            }
+        }
     }
-
-    print_board("Semi-Pruned", pruned, SOLUTION);
     
     /*
         Repeat the whiting and blacking pruning techniques until the solution doesn't change
     */
 
+    double techniques_end_time = omp_get_wtime();
     while (true) {
 
         Board white_solution = openmp_set_white(pruned);
@@ -218,7 +235,9 @@ int main(int argc, char** argv) {
     }
     double pruning_end_time = omp_get_wtime();
     
-    printf("Time needed %f\n", pruning_end_time-pruning_start_time);
+    printf("Time techniques needed %f\n", techniques_end_time-pruning_start_time);
+    printf("Time setting needed %f\n", pruning_end_time-techniques_end_time);
+    printf("Total Time pruning needed %f\n", pruning_end_time-pruning_start_time);
     print_board("Pruned", pruned, SOLUTION);
 
     return 0;

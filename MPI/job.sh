@@ -9,4 +9,4 @@ cd $PBS_O_WORKDIR
 
 module load mpich-3.2
 
-mpirun.actual -n 1 ./build/main.out input-9x9.txt
+mpirun.actual -n 1 ./build/main.out input-20x20.txt
