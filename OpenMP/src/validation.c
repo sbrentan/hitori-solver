@@ -237,9 +237,9 @@ bool check_hitori_conditions(Board board, BCB* block, double* dfs_time, double* 
 
     // Rule 3: When completed, all un-shaded (white) squares create a single continuous area
 
-    double start_dfs_time = MPI_Wtime();
+    double start_dfs_time = omp_get_wtime();
     bool result = all_white_cells_connected(board, block);
-    *dfs_time += MPI_Wtime() - start_dfs_time;
+    *dfs_time += omp_get_wtime() - start_dfs_time;
     if (!result) return false;
 
     return true;

@@ -3,10 +3,11 @@
 
 #include <stdbool.h>
 
-#define DEBUG 1
+#define DEBUG 0
 #define INPUT_PATH "../test-cases/inputs/"
 #define MAX_BUFFER_SIZE 2048
 #define SOLUTION_SPACES 4
+#define LEAF_QUEUE_SIZE 20
 
 typedef enum CellState {
     UNKNOWN = -1,
@@ -45,9 +46,10 @@ typedef struct BCB {
 } BCB;
 
 typedef struct Queue {
-    BCB items[SOLUTION_SPACES];
+    BCB *items;
     int front;
     int rear;
+    int size;
 } Queue;
 
 
