@@ -41,6 +41,8 @@ double master_wait_time = 0;
 double thread_wait_time = 0;
 double master_running_task = 0;
 
+double *individual_task_time;
+
 
 void task_build_solution_space(int solution_space_id){
     printf("Building solution space %d\n", solution_space_id);
@@ -259,14 +261,19 @@ void task_find_solution_for_real(BCB *block, int thread_id, int threads_in_solut
 
     // TODO: get into other solution space
 
-    #pragma omp atomic
-    task_time += omp_get_wtime() - start_time;
+    int thread_num = omp_get_thread_num();
+
+    // #pragma omp atomic
+    individual_task_time[thread_num] += omp_get_wtime() - start_time;
 }
 
 bool task_openmp_solution_for_real() {
     int RESUME_THRESHOLD = 4;
 
     int max_threads = omp_get_max_threads();
+
+    individual_task_time = malloc(max_threads * sizeof(double));
+    memset(individual_task_time, 0, max_threads * sizeof(double));
 
     if (DEBUG) printf("Solution spaces: %d\n", SOLUTION_SPACES);
 
@@ -452,6 +459,10 @@ int main(int argc, char** argv) {
     printf("Time for master running task: %f\n", master_running_task);
     printf("Time for next leaf: %f\n", next_leaf_time);
     printf("Time for next leaf allocation: %f\n", next_leaf_allocation_time);
+    // print individual task times
+    for (i = 0; i < omp_get_max_threads(); i++) {
+        printf("Time for task %d: %f\n", i, individual_task_time[i]);
+    }
     
     if (solution_found) {
         write_solution(board);
