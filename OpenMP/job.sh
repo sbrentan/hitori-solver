@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -l select=1:ncpus=4:mem=2gb
+#PBS -l select=1:ncpus=8:mem=2gb
 #PBS -l walltime=0:02:00
 #PBS -q short_cpuQ
 #PBS -o ./output/
@@ -7,6 +7,6 @@
 
 cd $PBS_O_WORKDIR
 
-export OMP_NUM_THREADS=4
+export OMP_NUM_THREADS=8
 
-./build/main.out test-25x25.txt
+./build/main.out input-20x20.txt
