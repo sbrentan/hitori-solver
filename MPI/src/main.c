@@ -573,7 +573,7 @@ int main(int argc, char** argv) {
 
     double pruning_start_time = MPI_Wtime();
     Board pruned = techniques[0](board, rank, size);
-    print_board("------", pruned, SOLUTION);
+    // print_board("------", pruned, SOLUTION);
 
     for (i = 1; i < num_techniques; i++) {
         // Board partial = techniques[i](pruned, rank, size);
@@ -584,7 +584,7 @@ int main(int argc, char** argv) {
         // print_board(name, partial, SOLUTION);
 
         pruned = combine_boards(pruned, techniques[i](pruned, rank, size), false, rank, "Partial");
-        print_board("------", pruned, SOLUTION);
+        // print_board("------", pruned, SOLUTION);
     }
 
     // print_board("Pruned", pruned, SOLUTION);
@@ -607,9 +607,6 @@ int main(int argc, char** argv) {
             break;
     }
     double pruning_end_time = MPI_Wtime();
-
-    print_board("Pruned solution", pruned, SOLUTION);
-    return 0;
 
     /*
         Initialize the backtracking variables

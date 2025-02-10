@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <omp.h>
 
 #include "../include/backtracking.h"
 #include "../include/validation.h"
+#include "../include/utils.h"
 
 bool build_leaf(Board board, BCB* block, int uk_x, int uk_y, int **unknown_index, int **unknown_index_length, int *total_processes_in_solution_space, int *solutions_to_skip) {
 
@@ -65,6 +67,8 @@ bool next_leaf(Board board, BCB *block, int **unknown_index, int **unknown_index
     int i, j, board_y_index;
     CellState cell_state;
 
+    int num_thread = omp_get_thread_num();
+
     /* if (!block->solution_space_unknowns[0] || !block->solution_space_unknowns[15] || !block->solution_space_unknowns[16]) {
         printf("[Next leaf] Error in solution space unknowns\n");
     } */
@@ -84,10 +88,15 @@ bool next_leaf(Board board, BCB *block, int **unknown_index, int **unknown_index
             }
 
             if (cell_state == UNKNOWN) {
-                printf("\n\n\n\n\n\n\nCell is unknown\n");
+                printf("\n\n\n\n\n\n\n[%d] Cell is unknown\n", num_thread);
                 // print_block("Block", block);
                 printf("Unknown index: %d %d\n\n\n\n\n\n", i, board_y_index);
+                printf("Vars: %d %d %d %d %d %d\n", i, j, board_y_index, cell_state, block->solution[i * board.cols_count + board_y_index], block->solution_space_unknowns[i * board.cols_count + j]);
                 // exit(-1);
+                // print solution
+                print_block(board, "Block", block);
+                // print unknowns
+                fflush(stdout);
                 return false;
             }
 
@@ -169,4 +178,6 @@ void compute_unknowns(Board board, int **unknown_index, int **unknown_index_leng
         if (temp_index < board.cols_count)
             (*unknown_index)[i * board.cols_count + temp_index] = -1;
     }
+    printf("Total unknowns: %d\n", total);
+    fflush(stdout);
 }

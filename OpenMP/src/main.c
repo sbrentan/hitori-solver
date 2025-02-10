@@ -17,12 +17,14 @@
 /* ------------------ GLOBAL VARIABLES ------------------ */
 Board board;
 Queue solution_queue;
+
+// TODO: remove
 Queue leaf_queue;
 
 // ----- Backtracking variables -----
 bool terminated = false;
 // bool is_my_solution_spaces_ended = false;
-int solutions_to_skip = 0;
+// int solutions_to_skip = 0;
 // int total_processes_in_solution_space = 1;
 int *unknown_index, *unknown_index_length;
 
@@ -42,6 +44,7 @@ double check_time = 0;
 double dfs_time = 0;
 double conditions_time = 0;
 
+// TODO: remove
 double next_leaf_time = 0;
 double next_leaf_allocation_time = 0;
 double building_time = 0;
@@ -62,6 +65,7 @@ void task_build_solution_space(int solution_space_id){
     };
     init_solution_space(board, &block, solution_space_id, &unknown_index);
     int threads_in_solution_space = 1;
+    int solutions_to_skip = 0;
     bool leaf_found = build_leaf(board, &block, 0, 0, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
     if (leaf_found) {
         double dfs_time = 0;
@@ -74,6 +78,7 @@ void task_build_solution_space(int solution_space_id){
                 memcpy(board.solution, block.solution, board.rows_count * board.cols_count * sizeof(CellState));
             }
             printf("Solution found\n");
+            fflush(stdout);
         } else {
             #pragma omp critical
             enqueue(&solution_queue, &block);
@@ -133,8 +138,9 @@ void task_find_solution() {
     task_time += omp_get_wtime() - start_time;
 }
 
+/*
 bool task_openmp_solution() {
-    int RESUME_THRESHOLD = 4;
+    // int RESUME_THRESHOLD = 4;
 
     int max_threads = omp_get_max_threads();
 
@@ -234,39 +240,73 @@ bool task_openmp_solution() {
 
     return terminated;
 }
+*/
 
+bool check_leaf(BCB *block, int thread_id, int threads_in_solution_space, int solution_space_id) {
+    bool leaf_found = next_leaf(board, block, &unknown_index, &unknown_index_length, &threads_in_solution_space, &thread_id);
 
+    if (!leaf_found) {
+        if (DEBUG) printf("Leaf not found\n");
+        fflush(stdout);
+    } else {
+        
+        bool solution_found = check_hitori_conditions(board, block, &dfs_time, &conditions_time);
+        
+        if (solution_found) {
+            #pragma omp critical
+            {
+                terminated = true;
+                memcpy(board.solution, block->solution, board.rows_count * board.cols_count * sizeof(CellState));
+            }
+            if (DEBUG) printf("Solution found\n");
+            fflush(stdout);
+            return true;
+        }
+    }
+    return false;
+}
 
 
 void task_find_solution_for_real(BCB *block, int thread_id, int threads_in_solution_space, int solution_space_id) {
 
-    if (DEBUG) printf("Finding solution with %d %d %d\n", thread_id, threads_in_solution_space, solution_space_id);
+    int thread_num = omp_get_thread_num();
+    
+    printf("[%d] Address of struct: %p\n", thread_num, (void*)block);
     fflush(stdout);
 
-    #pragma omp critical
-    {
-        printf("\n\nSolution\n");
-        int i, j;
-        for (i = 0; i < board.rows_count; i++) {
-            for (j = 0; j < board.cols_count; j++) {
-                printf("%d ", block->solution[i * board.cols_count + j]);
+    if (false) {
+        #pragma omp critical
+        {
+            if (DEBUG) printf("[%d] Finding solution with %d %d %d\n", thread_num, thread_id, threads_in_solution_space, solution_space_id);
+            fflush(stdout);
+            printf("\n\nSolution\n");
+            int i, j;
+            for (i = 0; i < board.rows_count; i++) {
+                for (j = 0; j < board.cols_count; j++) {
+                    printf("%d ", block->solution[i * board.cols_count + j]);
+                }
+                printf("\n");
             }
-            printf("\n");
-        }
-        printf("\n\nUnknowns\n");
-        fflush(stdout);
+            printf("\n\nUnknowns\n");
+            fflush(stdout);
 
-        for (i = 0; i < board.rows_count; i++) {
-            for (j = 0; j < board.cols_count; j++) {
-                printf("%d ", block->solution_space_unknowns[i * board.cols_count + j]);
+            for (i = 0; i < board.rows_count; i++) {
+                for (j = 0; j < board.cols_count; j++) {
+                    printf("%d ", block->solution_space_unknowns[i * board.cols_count + j]);
+                }
+                printf("\n");
             }
-            printf("\n");
+            printf("\n\n------------------\n\n");
+            fflush(stdout);
         }
-        printf("\n\n------------------\n\n");
-        fflush(stdout);
+        
+        sleep(1);
     }
 
-    bool exit = false;
+    if(DEBUG) printf("[%d] Starting task\n", thread_num);
+    fflush(stdout);
+
+    bool skip_ask_for_sharing = false;
     while(!terminated) {
         double start_time = omp_get_wtime();
 
@@ -300,9 +340,9 @@ void task_find_solution_for_real(BCB *block, int thread_id, int threads_in_solut
                 #pragma omp critical
                 {
                     if (threads_in_solution_space != threads_in_solution_spaces[solution_space_id])
-                        exit = true;
+                    skip_ask_for_sharing = true;
                 }
-                if (exit) {
+                if (skip_ask_for_sharing) {
                     if (DEBUG) printf("Exiting because of threads in solution space\n");
                     fflush(stdout);
                     break;
@@ -311,40 +351,24 @@ void task_find_solution_for_real(BCB *block, int thread_id, int threads_in_solut
             }
         }
 
-        bool leaf_found = next_leaf(board, block, &unknown_index, &unknown_index_length, &threads_in_solution_space, &thread_id);
-
-        if (!leaf_found) {
-            if (DEBUG) printf("Leaf not found\n");
-            fflush(stdout);
-            break;
-        } else {
-            
-            bool solution_found = check_hitori_conditions(board, block, &dfs_time, &conditions_time);
-            
-            if (solution_found) {
-                #pragma omp critical
-                {
-                    terminated = true;
-                    memcpy(board.solution, block->solution, board.rows_count * board.cols_count * sizeof(CellState));
-                }
-                if (DEBUG) printf("Solution found\n");
-                fflush(stdout);
-            }
-        }
+        bool solution_found = check_leaf(block, thread_id, threads_in_solution_space, solution_space_id);
 
         // TODO: get into other solution space
 
         #pragma omp atomic
         task_time += omp_get_wtime() - start_time;
 
-        int thread_num = omp_get_thread_num();
-
         individual_task_time[thread_num] += omp_get_wtime() - start_time;
+
+        if (solution_found){
+            skip_ask_for_sharing = true;
+            break;
+        }
 
         #pragma omp taskyield
     }
 
-    if (!exit) {
+    if (!skip_ask_for_sharing) {
         // TODO: get into other solution space
         #pragma omp critical
         solution_spaces_status[solution_space_id] = ASK_FOR_SHARING;
@@ -354,8 +378,103 @@ void task_find_solution_for_real(BCB *block, int thread_id, int threads_in_solut
     }
 }
 
+void find_solution_parallel() {
+    int max_threads = omp_get_max_threads();
+    int i, j;
+    #pragma omp single
+    {
+        // double next_leaf_time_start, next_leaf_allocation_time_start;
+        double start_time = omp_get_wtime();
+        double wait_start;
+        if (terminated) {
+            if (DEBUG) printf("Solution found when building leaves\n");
+        } else {
+            if (DEBUG) printf("Solution queue: %d\n", getQueueSize(&solution_queue));
+            fflush(stdout);
+
+            int queue_size = getQueueSize(&solution_queue);
+            for (i = 0; i < queue_size; i++) {
+
+                int threads_in_solution_space = max_threads / queue_size;
+                if (max_threads % queue_size > i)
+                    threads_in_solution_space++;
+                threads_in_solution_space = threads_in_solution_space < 1 ? 1 : threads_in_solution_space;
+
+                threads_in_solution_spaces[i] = threads_in_solution_space;
+                solution_spaces_status[i] = NO_STATUS;
+
+                BCB block = dequeue(&solution_queue);
+                for (j = 0; j < threads_in_solution_space; j++) {
+
+                    #pragma omp task firstprivate(block, j, threads_in_solution_space, i)
+                    {
+                        BCB new_block = {
+                            .solution = malloc(board.rows_count * board.cols_count * sizeof(CellState)),
+                            .solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool))
+                        };
+                        
+                        int k, l;
+                        for (k = 0; k < board.rows_count; k++) {
+                            for (l = 0; l < board.cols_count; l++) {
+                                new_block.solution[k * board.cols_count + l] = block.solution[k * board.cols_count + l];
+                                new_block.solution_space_unknowns[k * board.cols_count + l] = block.solution_space_unknowns[k * board.cols_count + l];
+                            }
+                        }
+                        
+                        task_find_solution_for_real(&new_block, j, threads_in_solution_space, i);
+                    }
+                    
+                    printf("Task started\n");
+                    fflush(stdout);
+                }
+            }
+            #pragma omp taskwait
+        }
+        if (DEBUG) printf("Finished finding solution\n");
+        fflush(stdout);
+
+        master_time = omp_get_wtime() - start_time;
+
+        wait_start = omp_get_wtime();
+        #pragma omp taskwait
+        master_wait_time += omp_get_wtime() - wait_start;
+    }
+}
+
+void find_solution_serial() {
+    int threads_in_solution_space = 1;
+    int solutions_to_skip = 0;
+    while(!terminated) {
+        if (isEmpty(&solution_queue) || terminated) {
+            if (DEBUG) printf("Solution queue is empty or terminated\n");
+            fflush(stdout);
+            break;
+        }
+
+        BCB current = dequeue(&solution_queue);
+
+        bool leaf_found = next_leaf(board, &current, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
+
+        if (leaf_found) {
+            
+            bool solution_found = check_hitori_conditions(board, &current, &dfs_time, &conditions_time);
+            
+            if (solution_found) {
+                terminated = true;
+                memcpy(board.solution, current.solution, board.rows_count * board.cols_count * sizeof(CellState));
+                if (DEBUG) printf("Solution found\n");
+            } else {
+                enqueue(&solution_queue, &current);
+            }
+        } else {
+            if (DEBUG) printf("One solution space ended\n");
+            fflush(stdout);
+        }
+    }
+}
+
 bool task_openmp_solution_for_real() {
-    int RESUME_THRESHOLD = 4;
+    // int RESUME_THRESHOLD = 4;
 
     int max_threads = omp_get_max_threads();
 
@@ -367,7 +486,7 @@ bool task_openmp_solution_for_real() {
     #pragma omp parallel
     {
         // TODO: decide whether to change allocation of variables
-        int i, j;
+        int i;
         building_time = omp_get_wtime();
         #pragma omp single
         {
@@ -383,62 +502,22 @@ bool task_openmp_solution_for_real() {
 
         if (DEBUG) printf("Finished building leaves\n");
 
-        #pragma omp single
-        {
-            double next_leaf_time_start, next_leaf_allocation_time_start;
-            double start_time = omp_get_wtime();
-            double wait_start;
-            if (terminated) {
-                if (DEBUG) printf("Solution found when building leaves\n");
-            } else {
-                if (DEBUG) printf("Solution queue: %d\n", getQueueSize(&solution_queue));
-                fflush(stdout);
-
-                int queue_size = getQueueSize(&solution_queue);
-                for (i = 0; i < queue_size; i++) {
-
-                    int threads_in_solution_space = max_threads / queue_size;
-                    if (max_threads % queue_size > i)
-                        threads_in_solution_space++;
-                    threads_in_solution_space = threads_in_solution_space < 1 ? 1 : threads_in_solution_space;
-
-                    threads_in_solution_spaces[i] = threads_in_solution_space;
-                    solution_spaces_status[i] = NO_STATUS;
-
-                    BCB block = dequeue(&solution_queue);
-                    for (j = 0; j < threads_in_solution_space; j++) {
-
-                        // TODO: IMPLEMENT AS MPI (Yeah, right?)
-
-                        #pragma omp task firstprivate(block, j, threads_in_solution_space, i)// if(0)// if(i < queue_size - 1 || j < threads_in_solution_space - 1)
-                        {
-                            BCB new_block;
-                            memcpy(&new_block, &block, sizeof(BCB));
-
-                            task_find_solution_for_real(&new_block, j, threads_in_solution_space, i);
-                        }
-                        
-                        printf("Task started\n");
-                        fflush(stdout);
-                    }
-                }
-                #pragma omp taskwait
-            }
-            if (DEBUG) printf("Finished finding solution\n");
-            fflush(stdout);
-
-            master_time = omp_get_wtime() - start_time;
-
-            wait_start = omp_get_wtime();
-            #pragma omp taskwait
-            master_wait_time += omp_get_wtime() - wait_start;
-        }
+        if (max_threads > 1)
+            find_solution_parallel();
+        else
+            find_solution_serial();
     }
 
     return terminated;
 }
 
 int main(int argc, char** argv) {
+
+    int max_threads = omp_get_max_threads();
+
+    printf("Starting Hitori solver\n");
+    printf("Max threads: %d\n", max_threads);
+    fflush(stdout);
 
     /*
         Read the board from the input file
@@ -464,29 +543,43 @@ int main(int argc, char** argv) {
         openmp_corner_cases
     };
 
-    int i;
+    int i, j;
     int num_techniques = sizeof(techniques) / sizeof(techniques[0]);
 
     double pruning_start_time = omp_get_wtime();
 
-    Board pruned = board;
-    #pragma omp parallel
-    {
-        #pragma omp single
-        {
-            for (i = 0; i < num_techniques; i++) {
-                #pragma omp task firstprivate(i)
-                {
-                    Board combined = combine_boards(pruned, techniques[i](board), false, "Partial");
-                        
-                    #pragma omp critical
-                    {
-                        pruned = combined;
-                    }
-                }
-            }
+    Board pruned = {
+        .rows_count = board.rows_count,
+        .cols_count = board.cols_count,
+        .grid = malloc(board.rows_count * board.cols_count * sizeof(CellState)),
+        .solution = malloc(board.rows_count * board.cols_count * sizeof(CellState))
+    };
+    
+    for (i = 0; i < board.rows_count; i++) {
+        for (j = 0; j < board.cols_count; j++) {
+            pruned.grid[i * board.cols_count + j] = board.grid[i * board.cols_count + j];
+            pruned.solution[i * board.cols_count + j] = board.solution[i * board.cols_count + j];
         }
     }
+    
+    int nt = omp_get_max_threads();
+    nt = nt > SOLUTION_SPACES ? SOLUTION_SPACES : nt;
+    
+    Board *partials = malloc(num_techniques * sizeof(Board));
+
+    #pragma omp parallel for num_threads(nt)
+    for (i = 0; i < num_techniques; i++) 
+    {
+        if (DEBUG) printf("Technique %d\n", i);
+        fflush(stdout);
+        partials[i] = techniques[i](board);
+    }
+
+    for (i = 0; i < num_techniques; i++)
+        pruned = combine_boards(pruned, partials[i], false, "Partial");
+
+    if (DEBUG) printf("Finished initial pruning\n");
+    fflush(stdout);
     
     /*
         Repeat the whiting and blacking pruning techniques until the solution doesn't change
@@ -512,6 +605,7 @@ int main(int argc, char** argv) {
     printf("Time setting needed %f\n", pruning_end_time-techniques_end_time);
     printf("Total Time pruning needed %f\n", pruning_end_time-pruning_start_time);
     print_board("Pruned", pruned, SOLUTION);
+    fflush(stdout);
 
     /*
         Initialize the backtracking variables
@@ -559,6 +653,7 @@ int main(int argc, char** argv) {
         write_solution(board);
         print_board("Solution found", board, SOLUTION);
     }
+    fflush(stdout);
 
     return 0;
 }
