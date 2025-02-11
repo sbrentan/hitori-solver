@@ -108,7 +108,7 @@ bool check_hitori_conditions(Board board, BCB* block) {
     }
 
     // Check if the number of white cells is equal to the number of connected white cells (meaning a single continuous area)
-    //return bfs_white_cells(board, block, visited, row, col) == white_cells_count;
+    // return bfs_white_cells(board, block, visited, row, col) == white_cells_count;
     // Rule 3: When completed, all un-shaded (white) squares create a single continuous area
     return dfs_white_cells(board, block, visited, row, col) == white_cells_count;
 }

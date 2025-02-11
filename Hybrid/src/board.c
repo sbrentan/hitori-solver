@@ -1,4 +1,3 @@
-#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +45,11 @@ void read_board(Board* board, char *filename) {
 
     if (rows != cols) {
         printf("The board must be a square.\n");
+        exit(1);
+    }
+
+    if (rows < 4) {
+        printf("The board must be at least 4x4.\n");
         exit(1);
     }
 
@@ -132,21 +136,12 @@ Board transpose(Board board) {
     return Tboard;
 }
 
-Board combine_boards(Board first_board, Board second_board, bool forced, int rank, char *technique) {
+Board combine_boards(Board first_board, Board second_board, bool forced, char *technique) {
     
     int rows = -1, cols = -1;
 
-    if (rank == MANAGER_RANK) {
-        rows = first_board.rows_count;
-        cols = first_board.cols_count;
-    }
-
-    /*
-        Broadcast the dimensions of the boards.
-    */
-
-    MPI_Bcast(&rows, 1, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
-    MPI_Bcast(&cols, 1, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
+    rows = first_board.rows_count;
+    cols = first_board.cols_count;
 
     /*
         Initialize the solution board with the values of the original board.
@@ -154,9 +149,7 @@ Board combine_boards(Board first_board, Board second_board, bool forced, int ran
 
     Board merged = { (int *) malloc(rows * cols * sizeof(int)), rows, cols, (int *) malloc(rows * cols * sizeof(int)) };
 
-    if (rank == MANAGER_RANK) merged.grid = first_board.grid;
-
-    MPI_Bcast(merged.grid, rows * cols, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
+    merged.grid = first_board.grid;
 
     /*
         Combine the solutions by performing a pairwise comparison:
@@ -165,26 +158,22 @@ Board combine_boards(Board first_board, Board second_board, bool forced, int ran
         3) If the values are different, mark the cell as black
     */
 
-    if (rank == MANAGER_RANK) {
+    memset(merged.solution, UNKNOWN, rows * cols * sizeof(int));
 
-        memset(merged.solution, UNKNOWN, rows * cols * sizeof(int));
-
-        int i, j;
-        for (i = 0; i < rows; i++) {
-            for (j = 0; j < cols; j++) {
-                if (first_board.solution[i * cols + j] == second_board.solution[i * cols + j]) merged.solution[i * cols + j] = first_board.solution[i * cols + j];
-                else if (!forced && first_board.solution[i * cols + j] == WHITE && second_board.solution[i * cols + j] == UNKNOWN) merged.solution[i * cols + j] = WHITE;
-                else if (!forced && first_board.solution[i * cols + j] == UNKNOWN && second_board.solution[i * cols + j] == WHITE) merged.solution[i * cols + j] = WHITE;
-                else if (!forced) merged.solution[i * cols + j] = BLACK;
-            }   
-        }
+    int i, j;
+    
+    for (i = 0; i < rows; i++) {
+        for (j = 0; j < cols; j++) {
+            if (first_board.solution[i * cols + j] == second_board.solution[i * cols + j]) 
+                merged.solution[i * cols + j] = first_board.solution[i * cols + j];
+            else if (first_board.solution[i * cols + j] == UNKNOWN && second_board.solution[i * cols + j] != UNKNOWN) 
+                merged.solution[i * cols + j] = second_board.solution[i * cols + j];
+            else if (first_board.solution[i * cols + j] != UNKNOWN && second_board.solution[i * cols + j] == UNKNOWN) 
+                merged.solution[i * cols + j] = first_board.solution[i * cols + j];
+            else
+                merged.solution[i * cols + j] = UNKNOWN;
+        }   
     }
 
-    /*
-        Broadcast the merged solution.
-    */
-    
-    MPI_Bcast(merged.solution, rows * cols, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
-    
     return merged;
 }

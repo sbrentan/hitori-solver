@@ -1,12 +1,12 @@
-#include <mpi.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
+#include <omp.h>
 
 #include "../include/pruning.h"
 #include "../include/board.h"
-#include "../include/utils.h"
 
-Board mpi_uniqueness_rule(Board board, int rank, int size) {
+Board uniqueness_rule(Board board) {
 
     /*
         RULE DESCRIPTION:
@@ -16,78 +16,46 @@ Board mpi_uniqueness_rule(Board board, int rank, int size) {
         e.g. 2 3 2 1 1 --> 2 O 2 1 1
     */
 
-    int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row);
-
-    int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col);
-    
     int i, j, k;
-    int local_row_solution[counts_send_row[rank]];
-    int local_col_solution[counts_send_col[rank]];
-
-    /*
-        Initialize the local solutions with UNKNOWN values.
-    */
-
-    memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
-    memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
-
-    // For each local row, check if there are unique values
-    for (i = 0; i < (counts_send_row[rank] / board.cols_count); i++) {
+    bool unique;
+    
+    int *uniqueness_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    memset(uniqueness_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
+    
+    for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
-            bool unique = true;
-            int value = local_row[i * board.cols_count + j];
 
+            int current_value = board.grid[i * board.cols_count + j];
+
+            unique = true;
             for (k = 0; k < board.cols_count; k++) {
-                if (j != k && value == local_row[i * board.cols_count + k]) {
+                if (j != k && current_value == board.grid[i * board.cols_count + k]) {
                     unique = false;
                     break;
                 }
             }
 
-            if (unique)
-                local_row_solution[i * board.cols_count + j] = WHITE; // If the value is unique, mark it as white
-            else
-                local_row_solution[i * board.cols_count + j] = UNKNOWN;
-        }
-    }
-
-    // For each local column, check if there are unique values
-    for (i = 0; i < (counts_send_col[rank] / board.rows_count); i++) {
-        for (j = 0; j < board.rows_count; j++) {
-            bool unique = true;
-            int value = local_col[i * board.rows_count + j];
-
-            for (k = 0; k < board.rows_count; k++) {
-                if (j != k && value == local_col[i * board.rows_count + k]) {
-                    unique = false;
-                    break;
+            if (unique) {
+                for (k = 0; k < board.rows_count; k++) {
+                    if (i != k && current_value == board.grid[k * board.rows_count + j]) {
+                        unique = false;
+                        break;
+                    }
                 }
-            }
 
-            if (unique)
-                local_col_solution[i * board.rows_count + j] = WHITE; // If the value is unique, mark it as white
-            else
-                local_col_solution[i * board.rows_count + j] = UNKNOWN;
+                if (unique)
+                    uniqueness_solution[i * board.cols_count + j] = WHITE; // If the value is unique, mark it as white
+            }
         }
     }
 
-    int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
-
-    Board row_board = (Board) { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
-
-    Board solution = combine_boards(row_board, col_board, true, rank, "Uniqueness Rule");
-
-    free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
+    Board solution = { board.grid, board.rows_count, board.cols_count, (int *) malloc(board.rows_count * board.cols_count * sizeof(int)) };
+    memcpy(solution.solution, uniqueness_solution, board.rows_count * board.cols_count * sizeof(int));
 
     return solution;
 }
 
-Board mpi_sandwich_rules(Board board, int rank, int size) {
+Board sandwich_rules(Board board) {
 
     /*
         RULE DESCRIPTION:
@@ -101,87 +69,60 @@ Board mpi_sandwich_rules(Board board, int rank, int size) {
         e.g. 2 3 2 --> 2 O 2
     */
 
-    int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row);
-
-    int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col);
-
     int i, j;
-    int local_row_solution[counts_send_row[rank]];
-    int local_col_solution[counts_send_col[rank]];
 
-    memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
-    memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
+    int *sandwich_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    memset(sandwich_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
 
-    // For each local row, check if triplet values are present
-    for (i = 0; i < (counts_send_row[rank] / board.cols_count); i++) {
+    for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
             if (j < board.cols_count - 2) {
-                int value1 = local_row[i * board.cols_count + j];
-                int value2 = local_row[i * board.cols_count + j + 1];
-                int value3 = local_row[i * board.cols_count + j + 2];
 
-                // 222 --> XOX
-                // 212 --> ?O?
+                int value1 = board.grid[i * board.cols_count + j];
+                int value2 = board.grid[i * board.cols_count + j + 1];
+                int value3 = board.grid[i * board.cols_count + j + 2];
+
                 if (value1 == value2 && value2 == value3) {
-                    local_row_solution[i * board.cols_count + j] = BLACK;
-                    local_row_solution[i * board.cols_count + j + 1] = WHITE;
-                    local_row_solution[i * board.cols_count + j + 2] = BLACK;
+                    sandwich_solution[i * board.cols_count + j] = BLACK;
+                    sandwich_solution[i * board.cols_count + j + 1] = WHITE;
+                    sandwich_solution[i * board.cols_count + j + 2] = BLACK;
 
-                    if (j - 1 >= 0) local_col_solution[i * board.rows_count + j - 1] = WHITE;
-                    if (j + 3 < board.rows_count) local_col_solution[i * board.rows_count + j + 3] = WHITE;
+                    if (j - 1 >= 0) sandwich_solution[i * board.cols_count + j - 1] = WHITE;
+                    if (j + 3 < board.cols_count) sandwich_solution[i * board.cols_count + j + 3] = WHITE;
 
                 } else if (value1 != value2 && value1 == value3) {
-                    local_row_solution[i * board.cols_count + j] = UNKNOWN;
-                    local_row_solution[i * board.cols_count + j + 1] = WHITE;
-                    local_row_solution[i * board.cols_count + j + 2] = UNKNOWN;
-                } 
+                    sandwich_solution[i * board.cols_count + j + 1] = WHITE;
+                }
             }
-        }
-    }
 
-    // For each local column, check if triplet values are present
-    for (i = 0; i < (counts_send_col[rank] / board.rows_count); i++) {
-        for (j = 0; j < board.rows_count; j++) {
-            if (j < board.rows_count - 2) {
-                int value1 = local_col[i * board.rows_count + j];
-                int value2 = local_col[i * board.rows_count + j + 1];
-                int value3 = local_col[i * board.rows_count + j + 2];
+            if (i < board.rows_count - 2) {
 
-                // 222 --> XOX
+                int value1 = board.grid[i * board.cols_count + j];
+                int value2 = board.grid[(i + 1) * board.cols_count + j];
+                int value3 = board.grid[(i + 2) * board.cols_count + j];
+
                 if (value1 == value2 && value2 == value3) {
-                    local_col_solution[i * board.rows_count + j] = BLACK;
-                    local_col_solution[i * board.rows_count + j + 1] = WHITE;
-                    local_col_solution[i * board.rows_count + j + 2] = BLACK;
+                    sandwich_solution[i * board.cols_count + j] = BLACK;
+                    sandwich_solution[(i + 1) * board.cols_count + j] = WHITE;
+                    sandwich_solution[(i + 2) * board.cols_count + j] = BLACK;
 
-                    if (j - 1 >= 0) local_col_solution[i * board.rows_count + j - 1] = WHITE;
-                    if (j + 3 < board.rows_count) local_col_solution[i * board.rows_count + j + 3] = WHITE;
+                    if (i - 1 >= 0) sandwich_solution[(i - 1) * board.cols_count + j] = WHITE;
+                    if (i + 3 < board.rows_count) sandwich_solution[(i + 3) * board.cols_count + j] = WHITE;
 
                 } else if (value1 != value2 && value1 == value3) {
-                    local_col_solution[i * board.rows_count + j] = UNKNOWN;
-                    local_col_solution[i * board.rows_count + j + 1] = WHITE;
-                    local_col_solution[i * board.rows_count + j + 2] = UNKNOWN;
+                    sandwich_solution[(i + 1) * board.cols_count + j] = WHITE;
                 }
             }
         }
     }
 
-    int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
-
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
-
-    Board solution = combine_boards(row_board, col_board, false, rank, "Sandwich Rules");
-    
-    free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
+    Board solution = { board.grid, board.rows_count, board.cols_count, (int *) malloc(board.rows_count * board.cols_count * sizeof(int)) };
+    memcpy(solution.solution, sandwich_solution, board.rows_count * board.cols_count * sizeof(int));
 
     return solution;
 }
 
-Board mpi_pair_isolation(Board board, int rank, int size) {
+Board pair_isolation(Board board) {
 
     /*
         RULE DESCRIPTION:
@@ -190,78 +131,62 @@ Board mpi_pair_isolation(Board board, int rank, int size) {
 
         e.g. 2 2 ... 2 ... 2 --> 2 2 ... X ... X
     */
-    
-    int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row);
-
-    int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col);
 
     int i, j, k;
-    int local_row_solution[counts_send_row[rank]];
-    int local_col_solution[counts_send_col[rank]];
 
-    memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
-    memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
+    int *pair_isolation_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    memset(pair_isolation_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
 
-    // For each local row, check if there are pairs of values
-    for (i = 0; i < (counts_send_row[rank] / board.cols_count); i++) {
+    for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
             if (j < board.cols_count - 1) {
-                int value1 = local_row[i * board.cols_count + j];
-                int value2 = local_row[i * board.cols_count + j + 1];
+                int value1 = board.grid[i * board.cols_count + j];
+                int value2 = board.grid[i * board.cols_count + j + 1];
 
                 if (value1 == value2) {
                     // Found a pair of values next to each other, mark all the other single values as black
-
                     for (k = 0; k < board.cols_count; k++) {
-                        int single = local_row[i * board.cols_count + k];
+                        int single = board.grid[i * board.cols_count + k];
                         bool isolated = true;
-                        
+
                         if (k != j && k != j + 1 && single == value1) {
 
-                            // Check if the value3 is isolated
-                            if (k - 1 >= 0 && local_row[i * board.cols_count + k - 1] == single) isolated = false;
-                            if (k + 1 < board.cols_count && local_row[i * board.cols_count + k + 1] == single) isolated = false;
+                            // Check if the value is isolated
+                            if (k - 1 >= 0 && board.grid[i * board.cols_count + k - 1] == single) isolated = false;
+                            if (k + 1 < board.cols_count && board.grid[i * board.cols_count + k + 1] == single) isolated = false;
 
                             if (isolated) {
-                                local_row_solution[i * board.cols_count + k] = BLACK;
+                                pair_isolation_solution[i * board.cols_count + k] = BLACK;
 
-                                if (k - 1 >= 0) local_row_solution[i * board.cols_count + k - 1] = WHITE;
-                                if (k + 1 < board.cols_count) local_row_solution[i * board.cols_count + k + 1] = WHITE;
+                                if (k - 1 >= 0) pair_isolation_solution[i * board.cols_count + k - 1] = WHITE;
+                                if (k + 1 < board.cols_count) pair_isolation_solution[i * board.cols_count + k + 1] = WHITE;
                             }
                         }
                     }
                 }
             }
-        }
-    }
-
-    // For each local column, check if there are pairs of values
-    for (i = 0; i < (counts_send_col[rank] / board.rows_count); i++) {
-        for (j = 0; j < board.rows_count; j++) {
-            if (j < board.rows_count - 1) {
-                int value1 = local_col[i * board.rows_count + j];
-                int value2 = local_col[i * board.rows_count + j + 1];
+            
+            if (i < board.rows_count - 1) {
+                int value1 = board.grid[i * board.rows_count + j];
+                int value2 = board.grid[(i + 1) * board.rows_count + j];
 
                 if (value1 == value2) {
                     // Found a pair of values next to each other, mark all the other single values as black
-
                     for (k = 0; k < board.rows_count; k++) {
-                        int single = local_col[i * board.rows_count + k];
+                        int single = board.grid[k * board.rows_count + j];
                         bool isolated = true;
-                        
-                        if (k != j && k != j + 1 && single == value1) {
 
-                            // Check if the value3 is isolated
-                            if (k - 1 >= 0 && local_col[i * board.rows_count + k - 1] == single) isolated = false;
-                            if (k + 1 < board.rows_count && local_col[i * board.rows_count + k + 1] == single) isolated = false;
+                        if (k != i && k != i + 1 && single == value1) {
+
+                            // Check if the value is isolated
+                            if (k - 1 >= 0 && board.grid[(k - 1) * board.rows_count + j] == single) isolated = false;
+                            if (k + 1 < board.rows_count && board.grid[(k + 1) * board.rows_count + j] == single) isolated = false;
 
                             if (isolated) {
-                                local_col_solution[i * board.rows_count + k] = BLACK;
+                                pair_isolation_solution[k * board.rows_count + j] = BLACK;
 
-                                if (k - 1 >= 0) local_col_solution[i * board.rows_count + k - 1] = WHITE;
-                                if (k + 1 < board.rows_count) local_col_solution[i * board.rows_count + k + 1] = WHITE;
+                                if (k - 1 >= 0) pair_isolation_solution[(k - 1) * board.rows_count + j] = WHITE;
+                                if (k + 1 < board.rows_count) pair_isolation_solution[(k + 1) * board.rows_count + j] = WHITE;
                             }
                         }
                     }
@@ -270,21 +195,14 @@ Board mpi_pair_isolation(Board board, int rank, int size) {
         }
     }
 
-    int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
-
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
-
-    Board solution = combine_boards(row_board, col_board, false, rank, "Pair Isolation");
-    
-    free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
+    Board solution = { board.grid, board.rows_count, board.cols_count, (int *) malloc(board.rows_count * board.cols_count * sizeof(int)) };
+    memcpy(solution.solution, pair_isolation_solution, board.rows_count * board.cols_count * sizeof(int));
 
     return solution;
+
 }
 
-Board mpi_flanked_isolation(Board board, int rank, int size) {
+Board flanked_isolation(Board board) {
 
     /*
         RULE DESCRIPTION:
@@ -294,62 +212,46 @@ Board mpi_flanked_isolation(Board board, int rank, int size) {
         e.g. 2 3 3 2 ... 2 ... 3 --> 2 3 3 2 ... X ... X
     */
 
-    int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row);
-
-    int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col);
-
     int i, j, k;
-    int local_row_solution[counts_send_row[rank]];
-    int local_col_solution[counts_send_col[rank]];
 
-    memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
-    memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
-
-    // For each local row, check if there is a flanked pair
-    for (i = 0; i < (counts_send_row[rank] / board.cols_count); i++) {
+    int *flanked_isolation_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    memset(flanked_isolation_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
+    
+    for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
-
             if (j < board.cols_count - 3) {
-                int value1 = local_row[i * board.cols_count + j];
-                int value2 = local_row[i * board.cols_count + j + 1];
-                int value3 = local_row[i * board.cols_count + j + 2];
-                int value4 = local_row[i * board.cols_count + j + 3];
+                int value1 = board.grid[i * board.cols_count + j];
+                int value2 = board.grid[i * board.cols_count + j + 1];
+                int value3 = board.grid[i * board.cols_count + j + 2];
+                int value4 = board.grid[i * board.cols_count + j + 3];
 
                 if (value1 == value4 && value2 == value3 && value1 != value2) {
                     for (k = 0; k < board.cols_count; k++) {
-                        int single = local_row[i * board.cols_count + k];
+                        int single = board.grid[i * board.cols_count + k];
                         if (k != j && k != j + 1 && k != j + 2 && k != j + 3 && (single == value1 || single == value2)) {
-                            local_row_solution[i * board.cols_count + k] = BLACK;
+                            flanked_isolation_solution[i * board.cols_count + k] = BLACK;
 
-                            if (k - 1 >= 0) local_row_solution[i * board.cols_count + k - 1] = WHITE;
-                            if (k + 1 < board.cols_count) local_row_solution[i * board.cols_count + k + 1] = WHITE;
+                            if (k - 1 >= 0) flanked_isolation_solution[i * board.cols_count + k - 1] = WHITE;
+                            if (k + 1 < board.cols_count) flanked_isolation_solution[i * board.cols_count + k + 1] = WHITE;
                         }
                     }
                 }
             }
-        }
-    }
-
-    // For each local column, check if there is a flanked pair
-    for (i = 0; i < (counts_send_col[rank] / board.rows_count); i++) {
-        for (j = 0; j < board.rows_count; j++) {
-
-            if (j < board.rows_count - 3) {
-                int value1 = local_col[i * board.rows_count + j];
-                int value2 = local_col[i * board.rows_count + j + 1];
-                int value3 = local_col[i * board.rows_count + j + 2];
-                int value4 = local_col[i * board.rows_count + j + 3];
+            
+            if (i < board.rows_count - 3) {
+                int value1 = board.grid[i * board.rows_count + j];
+                int value2 = board.grid[(i + 1) * board.rows_count + j];
+                int value3 = board.grid[(i + 2) * board.rows_count + j];
+                int value4 = board.grid[(i + 3) * board.rows_count + j];
 
                 if (value1 == value4 && value2 == value3 && value1 != value2) {
                     for (k = 0; k < board.rows_count; k++) {
-                        int single = local_col[i * board.rows_count + k];
-                        if (k != j && k != j + 1 && k != j + 2 && k != j + 3 && (single == value1 || single == value2)) {
-                            local_col_solution[i * board.rows_count + k] = BLACK;
+                        int single = board.grid[k * board.rows_count + j];
+                        if (k != i && k != i + 1 && k != i + 2 && k != i + 3 && (single == value1 || single == value2)) {
+                            flanked_isolation_solution[k * board.rows_count + j] = BLACK;
 
-                            if (k - 1 >= 0) local_col_solution[i * board.rows_count + k - 1] = WHITE;
-                            if (k + 1 < board.rows_count) local_col_solution[i * board.rows_count + k + 1] = WHITE;
+                            if (k - 1 >= 0) flanked_isolation_solution[(k - 1) * board.rows_count + j] = WHITE;
+                            if (k + 1 < board.rows_count) flanked_isolation_solution[(k + 1) * board.rows_count + j] = WHITE;
                         }
                     }
                 }
@@ -357,28 +259,13 @@ Board mpi_flanked_isolation(Board board, int rank, int size) {
         }
     }
 
-    int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
-
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
-
-    Board solution = combine_boards(row_board, col_board, false, rank, "Flanked Isolation");
-
-    free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
+    Board solution = { board.grid, board.rows_count, board.cols_count, (int *) malloc(board.rows_count * board.cols_count * sizeof(int)) };
+    memcpy(solution.solution, flanked_isolation_solution, board.rows_count * board.cols_count * sizeof(int));
 
     return solution;
 }
 
-void compute_corner(Board board, int x, int y, CornerType corner_type, int **local_corner_solution) {
-    
-    /*
-        Set the local board to work with the corner
-    */
-
-    *local_corner_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
-    memset(*local_corner_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
+void compute_corner(Board board, int x, int y, CornerType corner_type, int **solution) {
 
     /*
         Get the values of the corner cells based on the corner indexes (x, y):
@@ -401,28 +288,28 @@ void compute_corner(Board board, int x, int y, CornerType corner_type, int **loc
         case TOP_LEFT:
         case BOTTOM_RIGHT:
             if (top_left == top_right && top_left == bottom_left) {
-                (*local_corner_solution)[x] = BLACK;
-                (*local_corner_solution)[x + 1] = WHITE;
-                (*local_corner_solution)[y] = WHITE;
+                (*solution)[x] = BLACK;
+                (*solution)[x + 1] = WHITE;
+                (*solution)[y] = WHITE;
 
             } else if (bottom_right == top_right && bottom_right == bottom_left) {
-                (*local_corner_solution)[y + 1] = BLACK;
-                (*local_corner_solution)[y] = WHITE;
-                (*local_corner_solution)[x + 1] = WHITE;
+                (*solution)[y + 1] = BLACK;
+                (*solution)[y] = WHITE;
+                (*solution)[x + 1] = WHITE;
             }
             break;
         
         case TOP_RIGHT:
         case BOTTOM_LEFT:
             if (top_left == top_right && top_right == bottom_right) {
-                (*local_corner_solution)[x + 1] = BLACK;
-                (*local_corner_solution)[x] = WHITE;
-                (*local_corner_solution)[y + 1] = WHITE;
+                (*solution)[x + 1] = BLACK;
+                (*solution)[x] = WHITE;
+                (*solution)[y + 1] = WHITE;
 
             } else if (bottom_left == top_left && bottom_left == bottom_right) {
-                (*local_corner_solution)[y] = BLACK;
-                (*local_corner_solution)[x] = WHITE;
-                (*local_corner_solution)[y + 1] = WHITE;
+                (*solution)[y] = BLACK;
+                (*solution)[x] = WHITE;
+                (*solution)[y + 1] = WHITE;
             }
             break;
     }
@@ -435,17 +322,17 @@ void compute_corner(Board board, int x, int y, CornerType corner_type, int **loc
     switch (corner_type) {
         case TOP_LEFT:
         case BOTTOM_RIGHT:
-            if (top_left == top_right) (*local_corner_solution)[y] = WHITE;
-            else if (top_left == bottom_left) (*local_corner_solution)[x + 1] = WHITE;
-            else if (bottom_left == bottom_right) (*local_corner_solution)[x + 1] = WHITE;
-            else if (top_right == bottom_right) (*local_corner_solution)[y] = WHITE;
+            if (top_left == top_right) (*solution)[y] = WHITE;
+            else if (top_left == bottom_left) (*solution)[x + 1] = WHITE;
+            else if (bottom_left == bottom_right) (*solution)[x + 1] = WHITE;
+            else if (top_right == bottom_right) (*solution)[y] = WHITE;
             break;
         case TOP_RIGHT:
         case BOTTOM_LEFT:
-            if (top_left == top_right) (*local_corner_solution)[y + 1] = WHITE;
-            else if (top_right == bottom_right) (*local_corner_solution)[x] = WHITE;
-            else if (bottom_left == bottom_right) (*local_corner_solution)[x] = WHITE;
-            else if (top_left == bottom_left) (*local_corner_solution)[y + 1] = WHITE;
+            if (top_left == top_right) (*solution)[y + 1] = WHITE;
+            else if (top_right == bottom_right) (*solution)[x] = WHITE;
+            else if (bottom_left == bottom_right) (*solution)[x] = WHITE;
+            else if (top_left == bottom_left) (*solution)[y + 1] = WHITE;
             break;
     }
 
@@ -460,17 +347,17 @@ void compute_corner(Board board, int x, int y, CornerType corner_type, int **loc
             switch (corner_type) {        
                 case TOP_LEFT:
                 case BOTTOM_LEFT:
-                    (*local_corner_solution)[x] = BLACK;
-                    (*local_corner_solution)[x + 1] = WHITE;
-                    (*local_corner_solution)[y] = WHITE;
-                    (*local_corner_solution)[y + 1] = BLACK;
+                    (*solution)[x] = BLACK;
+                    (*solution)[x + 1] = WHITE;
+                    (*solution)[y] = WHITE;
+                    (*solution)[y + 1] = BLACK;
                     break;
                 case TOP_RIGHT:
                 case BOTTOM_RIGHT:
-                    (*local_corner_solution)[x] = WHITE;
-                    (*local_corner_solution)[x + 1] = BLACK;
-                    (*local_corner_solution)[y] = BLACK;
-                    (*local_corner_solution)[y + 1] = WHITE;
+                    (*solution)[x] = WHITE;
+                    (*solution)[x + 1] = BLACK;
+                    (*solution)[y] = BLACK;
+                    (*solution)[y + 1] = WHITE;
                     break;
             }
         }
@@ -482,19 +369,18 @@ void compute_corner(Board board, int x, int y, CornerType corner_type, int **loc
     switch (corner_type) { 
         case TOP_LEFT:
         case BOTTOM_RIGHT:
-            if (board.solution[x + 1] == BLACK) (*local_corner_solution)[y] = WHITE;
-            else if (board.solution[y] == BLACK) (*local_corner_solution)[x + 1] = WHITE;
+            if (board.solution[x + 1] == BLACK) (*solution)[y] = WHITE;
+            else if (board.solution[y] == BLACK) (*solution)[x + 1] = WHITE;
             break;
         case TOP_RIGHT:
         case BOTTOM_LEFT:
-            if (board.solution[x] == BLACK) (*local_corner_solution)[y + 1] = WHITE;
-            else if (board.solution[y + 1] == BLACK) (*local_corner_solution)[x] = WHITE;
+            if (board.solution[x] == BLACK) (*solution)[y + 1] = WHITE;
+            else if (board.solution[y + 1] == BLACK) (*solution)[x] = WHITE;
             break;
     }
 }
 
-Board mpi_corner_cases(Board board, int rank, int size) {
-    
+Board corner_cases(Board board) {  
     /*
         RULE DESCRIPTION:
         
@@ -520,113 +406,43 @@ Board mpi_corner_cases(Board board, int rank, int size) {
             2) Four processes to compute each corner (if 4 or more processes)
     */
 
-    MPI_Comm TWO_PROCESSESS_COMM;
-    MPI_Comm_split(MPI_COMM_WORLD, rank < 2, rank, &TWO_PROCESSESS_COMM);
-
-    MPI_Comm FOUR_PROCESSESS_COMM;
-    MPI_Comm_split(MPI_COMM_WORLD, rank < 4, rank, &FOUR_PROCESSESS_COMM);
-    
-    int *solutions, *local_corner_solution;
-
-    if (rank < 4) {
-
-        /*
-            If MANAGER, then allocate the memory for four boards, one for each corner
-        */
-
-        if (rank == MANAGER_RANK) solutions = (int *) malloc(4 * board.rows_count * board.cols_count * sizeof(int));
-
-        /*
-            Define all the indexes for each corner
-        */
-
-        int top_left_x = 0;
-        int top_left_y = board.cols_count;
-
-        int top_right_x = board.cols_count - 2;
-        int top_right_y = 2 * board.cols_count - 2;
-
-        int bottom_left_x = (board.rows_count - 2) * board.cols_count;
-        int bottom_left_y = (board.rows_count - 1) * board.cols_count;
-
-        int bottom_right_x = (board.rows_count - 2) * board.cols_count + board.cols_count - 2;
-        int bottom_right_y = (board.rows_count - 1) * board.cols_count + board.cols_count - 2;
-
-        /*
-            Compute the corner cases and communicate the results to process 0
-        */
-
-        switch (size) {
-            case 1:
-                compute_corner(board, top_left_x, top_left_y, TOP_LEFT, &local_corner_solution);
-                memcpy(solutions, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
-                compute_corner(board, top_right_x, top_right_y, TOP_RIGHT, &local_corner_solution);
-                memcpy(solutions + board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
-                compute_corner(board, bottom_left_x, bottom_left_y, BOTTOM_LEFT, &local_corner_solution);
-                memcpy(solutions + 2 * board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
-                compute_corner(board, bottom_right_x, bottom_right_y, BOTTOM_RIGHT, &local_corner_solution);
-                memcpy(solutions + 3 * board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
-                break;
-            case 2:
-            case 3:                
-                if (rank == 0) {
-                    compute_corner(board, top_left_x, top_left_y, TOP_LEFT, &local_corner_solution);
-                    memcpy(solutions, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
-                    MPI_Recv(solutions + 2 * board.rows_count * board.cols_count, board.rows_count * board.cols_count, MPI_INT, 1, 0, TWO_PROCESSESS_COMM, MPI_STATUS_IGNORE);
-
-                    compute_corner(board, top_right_x, top_right_y, TOP_RIGHT, &local_corner_solution);
-                    memcpy(solutions + board.rows_count * board.cols_count, local_corner_solution, board.rows_count * board.cols_count * sizeof(int));
-                    MPI_Recv(solutions + 3 * board.rows_count * board.cols_count, board.rows_count * board.cols_count, MPI_INT, 1, 0, TWO_PROCESSESS_COMM, MPI_STATUS_IGNORE);
-                    
-                } else if (rank == 1) {
-                    compute_corner(board, bottom_left_x, bottom_left_y, BOTTOM_LEFT, &local_corner_solution);
-                    MPI_Send(local_corner_solution, board.rows_count * board.cols_count, MPI_INT, 0, 0, TWO_PROCESSESS_COMM);
-                    
-                    compute_corner(board, bottom_right_x, bottom_right_y, BOTTOM_RIGHT, &local_corner_solution);
-                    MPI_Send(local_corner_solution, board.rows_count * board.cols_count, MPI_INT, 0, 0, TWO_PROCESSESS_COMM);
-                }
-                break;
-            default:
-                if (rank == 0) compute_corner(board, top_left_x, top_left_y, TOP_LEFT, &local_corner_solution);
-                else if (rank == 1) compute_corner(board, top_right_x, top_right_y, TOP_RIGHT, &local_corner_solution);
-                else if (rank == 2) compute_corner(board, bottom_left_x, bottom_left_y, BOTTOM_LEFT, &local_corner_solution);
-                else if (rank == 3) compute_corner(board, bottom_right_x, bottom_right_y, BOTTOM_RIGHT, &local_corner_solution);
-                
-                MPI_Gather(local_corner_solution, board.rows_count * board.cols_count, MPI_INT, solutions + rank * board.rows_count * board.cols_count, board.rows_count * board.cols_count, MPI_INT, 0, FOUR_PROCESSESS_COMM);
-                break;
-            
-            free(local_corner_solution);
-        }
-    }
-
-    /*
-        Combine the partial solutions
-    */
-
     int rows = board.rows_count;
     int cols = board.cols_count;
+    int board_size = rows * cols;
 
-    Board top_left_board = { board.grid, board.rows_count, board.cols_count, solutions };
-    Board top_right_board = { board.grid, board.rows_count, board.cols_count, solutions + rows * cols };
-    Board bottom_left_board = { board.grid, board.rows_count, board.cols_count, solutions + 2 * rows * cols };
-    Board bottom_right_board = { board.grid, board.rows_count, board.cols_count, solutions + 3 * rows * cols };
+    int top_left_x = 0;
+    int top_left_y = cols;
 
-    Board top_corners_board = combine_boards(top_left_board, top_right_board, false, rank, "Top Corner Cases");
-    Board bottom_corners_board = combine_boards(bottom_left_board, bottom_right_board, false, rank, "Bottom Corner Cases");
+    int top_right_x = cols - 2;
+    int top_right_y = 2 * cols - 2;
 
-    Board solution = combine_boards(top_corners_board, bottom_corners_board, false, rank, "Corner Cases");
+    int bottom_left_x = (rows - 2) * cols;
+    int bottom_left_y = (rows - 1) * cols;
+
+    int bottom_right_x = (rows - 2) * cols + cols - 2;
+    int bottom_right_y = (rows - 1) * cols + cols - 2;
+
+    int *corner_solution = (int *) malloc(board_size * sizeof(int));
+    memset(corner_solution, UNKNOWN, board_size * sizeof(int));
+
+    compute_corner(board, top_left_x, top_left_y, TOP_LEFT, &corner_solution);
+    compute_corner(board, top_right_x, top_right_y, TOP_RIGHT, &corner_solution);
+    compute_corner(board, bottom_left_x, bottom_left_y, BOTTOM_LEFT, &corner_solution);
+    compute_corner(board, bottom_right_x, bottom_right_y, BOTTOM_RIGHT, &corner_solution);
 
     /*
-        Destroy the temporary communicators, compute the final solution and broadcast it to all processes
+        Initialize the board with the corner solution
     */
 
-    MPI_Comm_free(&TWO_PROCESSESS_COMM);
-    MPI_Comm_free(&FOUR_PROCESSESS_COMM);
+    Board solution = { board.grid, board.rows_count, board.cols_count, (int *) malloc(board_size * sizeof(int)) };
+    memcpy(solution.solution, corner_solution, board_size * sizeof(int));
+
+    free(corner_solution);
 
     return solution;
 }
 
-Board mpi_set_white(Board board, int rank, int size) {
+Board set_white(Board board) {
     
     /*
         RULE DESCRIPTION:
@@ -636,81 +452,44 @@ Board mpi_set_white(Board board, int rank, int size) {
         e.g. Suppose a whited 3. Then 2 O ... 3 --> 2 O ... X
     */
 
-    int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, SOLUTION, &local_row, &counts_send_row, &displs_send_row);
-
-    int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, SOLUTION, &local_col, &counts_send_col, &displs_send_col);
-
     int i, j, k;
-    int local_row_solution[counts_send_row[rank]];
-    int local_col_solution[counts_send_col[rank]];
 
-    memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
-    memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
+    int *set_white_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));    
+    memset(set_white_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
 
-    int starting_index = 0;
-
-    for (i = 0; i < rank; i++)
-        starting_index += counts_send_row[i];
-    
-    // For each local row, check if there is a white cell
-    int rows_count = (counts_send_row[rank] / board.cols_count);
-    for (i = 0; i < rows_count; i++) {
-        int grid_row_index = starting_index + i * board.cols_count;
+    for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
-            if (local_row[i * board.cols_count + j] == WHITE) {
-                int value = board.grid[grid_row_index + j];
-
+            if (board.solution[i * board.cols_count + j] == WHITE) {
+                int value = board.grid[i * board.cols_count + j];
+                
                 for (k = 0; k < board.cols_count; k++) {
-                    if (board.grid[grid_row_index + k] == value && k != j) {
-                        local_row_solution[i * board.cols_count + k] = BLACK;
+                    if (board.grid[i * board.cols_count + k] == value && k != j) {
+                        set_white_solution[i * board.cols_count + k] = BLACK;
 
-                        if (k - 1 >= 0) local_row_solution[i * board.cols_count + k - 1] = WHITE;
-                        if (k + 1 < board.cols_count) local_row_solution[i * board.cols_count + k + 1] = WHITE;
+                        if (k - 1 >= 0) set_white_solution[i * board.cols_count + k - 1] = WHITE;
+                        if (k + 1 < board.cols_count) set_white_solution[i * board.cols_count + k + 1] = WHITE;
                     }
                 }
-            }
-        }
-    }
-
-    Board TBoard = transpose(board);
-
-    // For each local column, check if triplet values are present
-    int cols_count = (counts_send_col[rank] / board.rows_count);
-    for (i = 0; i < cols_count; i++) {
-        int grid_col_index = starting_index + i * board.rows_count;
-        for (j = 0; j < board.rows_count; j++) {
-            if (local_col[i * board.rows_count + j] == WHITE) {
-                int value = TBoard.grid[grid_col_index + j];
 
                 for (k = 0; k < board.rows_count; k++) {
-                    if (TBoard.grid[grid_col_index + k] == value && k != j) {
-                        local_col_solution[i * board.rows_count + k] = BLACK;
+                    if (board.grid[k * board.rows_count + j] == value && k != i) {
+                        set_white_solution[k * board.rows_count + j] = BLACK;
 
-                        if (k - 1 >= 0) local_col_solution[i * board.rows_count + k - 1] = WHITE;
-                        if (k + 1 < board.rows_count) local_col_solution[i * board.rows_count + k + 1] = WHITE;
+                        if (k - 1 >= 0) set_white_solution[(k - 1) * board.rows_count + j] = WHITE;
+                        if (k + 1 < board.rows_count) set_white_solution[(k + 1) * board.rows_count + j] = WHITE;
                     }
                 }
             }
         }
     }
 
-    int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
-
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution }; 
-    Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
-
-    Board solution = combine_boards(row_board, col_board, false, rank, "Set White");
-    
-    free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
+    Board solution = { board.grid, board.rows_count, board.cols_count, (int *) malloc(board.rows_count * board.cols_count * sizeof(int)) };
+    memcpy(solution.solution, set_white_solution, board.rows_count * board.cols_count * sizeof(int));
 
     return solution;
 }
 
-Board mpi_set_black(Board board, int rank, int size) {
+Board set_black(Board board) {
     
     /*
         RULE DESCRIPTION:
@@ -720,49 +499,25 @@ Board mpi_set_black(Board board, int rank, int size) {
         e.g. 2 X 2 --> O X O
     */
 
-    int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, SOLUTION, &local_row, &counts_send_row, &displs_send_row);
-
-    int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, SOLUTION, &local_col, &counts_send_col, &displs_send_col);
-
     int i, j;
-    int local_row_solution[counts_send_row[rank]];
-    int local_col_solution[counts_send_col[rank]];
 
-    memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
-    memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
+    int *set_black_solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
+    memset(set_black_solution, UNKNOWN, board.rows_count * board.cols_count * sizeof(int));
 
-    // For each local row, check if there is a white cell
-    for (i = 0; i < (counts_send_row[rank] / board.cols_count); i++) {
+    for (i = 0; i < board.rows_count; i++) {
         for (j = 0; j < board.cols_count; j++) {
-            if (local_row[i * board.cols_count + j] == BLACK) {                
-                if (j - 1 >= 0) local_row_solution[i * board.cols_count + j - 1] = WHITE;
-                if (j + 1 < board.cols_count) local_row_solution[i * board.cols_count + j + 1] = WHITE;
+            if (board.solution[i * board.cols_count + j] == BLACK) {
+                if (j - 1 >= 0) set_black_solution[i * board.cols_count + j - 1] = WHITE;
+                if (j + 1 < board.cols_count) set_black_solution[i * board.cols_count + j + 1] = WHITE;
+                
+                if (i - 1 >= 0) set_black_solution[(i - 1) * board.rows_count + j ] = WHITE;
+                if (i + 1 < board.rows_count) set_black_solution[(i + 1) * board.rows_count + j ] = WHITE;
             }
         }
     }
 
-    // For each local column, check if triplet values are present
-    for (i = 0; i < (counts_send_col[rank] / board.rows_count); i++) {
-        for (j = 0; j < board.rows_count; j++) {
-            if (local_col[i * board.rows_count + j] == BLACK) {
-                if (j - 1 >= 0) local_col_solution[i * board.rows_count + j - 1] = WHITE;
-                if (j + 1 < board.rows_count) local_col_solution[i * board.rows_count + j + 1] = WHITE;
-            }
-        }
-    }
-
-    int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
-
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
-
-    Board solution = combine_boards(row_board, col_board, false, rank, "Set Black");
-
-    free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
+    Board solution = { board.grid, board.rows_count, board.cols_count, (int *) malloc(board.rows_count * board.cols_count * sizeof(int)) };
+    memcpy(solution.solution, set_black_solution, board.rows_count * board.cols_count * sizeof(int));
 
     return solution;
 }
