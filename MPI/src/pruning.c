@@ -87,147 +87,6 @@ Board mpi_uniqueness_rule(Board board, int rank, int size) {
     return solution;
 }
 
-Board mpi_set_white(Board board, int rank, int size) {
-    
-    /*
-        RULE DESCRIPTION:
-        
-        When you have whited a cell, you can mark all the other cells with the same number in the row or column as black
-        
-        e.g. Suppose a whited 3. Then 2 O ... 3 --> 2 O ... X
-    */
-
-    int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, SOLUTION, &local_row, &counts_send_row, &displs_send_row);
-
-    int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, SOLUTION, &local_col, &counts_send_col, &displs_send_col);
-
-    int i, j, k;
-    int local_row_solution[counts_send_row[rank]];
-    int local_col_solution[counts_send_col[rank]];
-
-    memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
-    memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
-
-    int starting_index = 0;
-
-    for (i = 0; i < rank; i++)
-        starting_index += counts_send_row[i];
-    
-    // For each local row, check if there is a white cell
-    int rows_count = (counts_send_row[rank] / board.cols_count);
-    for (i = 0; i < rows_count; i++) {
-        int grid_row_index = starting_index + i * board.cols_count;
-        for (j = 0; j < board.cols_count; j++) {
-            if (local_row[i * board.cols_count + j] == WHITE) {
-                int value = board.grid[grid_row_index + j];
-
-                for (k = 0; k < board.cols_count; k++) {
-                    if (board.grid[grid_row_index + k] == value && k != j) {
-                        local_row_solution[i * board.cols_count + k] = BLACK;
-
-                        if (k - 1 >= 0) local_row_solution[i * board.cols_count + k - 1] = WHITE;
-                        if (k + 1 < board.cols_count) local_row_solution[i * board.cols_count + k + 1] = WHITE;
-                    }
-                }
-            }
-        }
-    }
-
-    Board TBoard = transpose(board);
-
-    // For each local column, check if triplet values are present
-    int cols_count = (counts_send_col[rank] / board.rows_count);
-    for (i = 0; i < cols_count; i++) {
-        int grid_col_index = starting_index + i * board.rows_count;
-        for (j = 0; j < board.rows_count; j++) {
-            if (local_col[i * board.rows_count + j] == WHITE) {
-                int value = TBoard.grid[grid_col_index + j];
-
-                for (k = 0; k < board.rows_count; k++) {
-                    if (TBoard.grid[grid_col_index + k] == value && k != j) {
-                        local_col_solution[i * board.rows_count + k] = BLACK;
-
-                        if (k - 1 >= 0) local_col_solution[i * board.rows_count + k - 1] = WHITE;
-                        if (k + 1 < board.rows_count) local_col_solution[i * board.rows_count + k + 1] = WHITE;
-                    }
-                }
-            }
-        }
-    }
-
-    int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
-
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution }; 
-    Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
-
-    Board solution = combine_boards(row_board, col_board, false, rank, "Set White");
-    
-    free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
-
-    return solution;
-}
-
-Board mpi_set_black(Board board, int rank, int size) {
-    
-    /*
-        RULE DESCRIPTION:
-        
-        When you have marked a black cell, all the cells around it must be white.
-
-        e.g. 2 X 2 --> O X O
-    */
-
-    int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, SOLUTION, &local_row, &counts_send_row, &displs_send_row);
-
-    int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, SOLUTION, &local_col, &counts_send_col, &displs_send_col);
-
-    int i, j;
-    int local_row_solution[counts_send_row[rank]];
-    int local_col_solution[counts_send_col[rank]];
-
-    memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
-    memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
-
-    // For each local row, check if there is a white cell
-    for (i = 0; i < (counts_send_row[rank] / board.cols_count); i++) {
-        for (j = 0; j < board.cols_count; j++) {
-            if (local_row[i * board.cols_count + j] == BLACK) {                
-                if (j - 1 >= 0) local_row_solution[i * board.cols_count + j - 1] = WHITE;
-                if (j + 1 < board.cols_count) local_row_solution[i * board.cols_count + j + 1] = WHITE;
-            }
-        }
-    }
-
-    // For each local column, check if triplet values are present
-    for (i = 0; i < (counts_send_col[rank] / board.rows_count); i++) {
-        for (j = 0; j < board.rows_count; j++) {
-            if (local_col[i * board.rows_count + j] == BLACK) {
-                if (j - 1 >= 0) local_col_solution[i * board.rows_count + j - 1] = WHITE;
-                if (j + 1 < board.rows_count) local_col_solution[i * board.rows_count + j + 1] = WHITE;
-            }
-        }
-    }
-
-    int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
-
-    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
-    Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
-
-    Board solution = combine_boards(row_board, col_board, false, rank, "Set Black");
-
-    free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
-
-    return solution;
-}
-
 Board mpi_sandwich_rules(Board board, int rank, int size) {
 
     /*
@@ -420,6 +279,93 @@ Board mpi_pair_isolation(Board board, int rank, int size) {
 
     Board solution = combine_boards(row_board, col_board, false, rank, "Pair Isolation");
     
+    free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
+
+    return solution;
+}
+
+Board mpi_flanked_isolation(Board board, int rank, int size) {
+
+    /*
+        RULE DESCRIPTION:
+        
+        If you find two doubles packed, singles must be black
+
+        e.g. 2 3 3 2 ... 2 ... 3 --> 2 3 3 2 ... X ... X
+    */
+
+    int *local_row, *counts_send_row, *displs_send_row;
+    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row);
+
+    int *local_col, *counts_send_col, *displs_send_col;
+    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col);
+
+    int i, j, k;
+    int local_row_solution[counts_send_row[rank]];
+    int local_col_solution[counts_send_col[rank]];
+
+    memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
+    memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
+
+    // For each local row, check if there is a flanked pair
+    for (i = 0; i < (counts_send_row[rank] / board.cols_count); i++) {
+        for (j = 0; j < board.cols_count; j++) {
+
+            if (j < board.cols_count - 3) {
+                int value1 = local_row[i * board.cols_count + j];
+                int value2 = local_row[i * board.cols_count + j + 1];
+                int value3 = local_row[i * board.cols_count + j + 2];
+                int value4 = local_row[i * board.cols_count + j + 3];
+
+                if (value1 == value4 && value2 == value3 && value1 != value2) {
+                    for (k = 0; k < board.cols_count; k++) {
+                        int single = local_row[i * board.cols_count + k];
+                        if (k != j && k != j + 1 && k != j + 2 && k != j + 3 && (single == value1 || single == value2)) {
+                            local_row_solution[i * board.cols_count + k] = BLACK;
+
+                            if (k - 1 >= 0) local_row_solution[i * board.cols_count + k - 1] = WHITE;
+                            if (k + 1 < board.cols_count) local_row_solution[i * board.cols_count + k + 1] = WHITE;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // For each local column, check if there is a flanked pair
+    for (i = 0; i < (counts_send_col[rank] / board.rows_count); i++) {
+        for (j = 0; j < board.rows_count; j++) {
+
+            if (j < board.rows_count - 3) {
+                int value1 = local_col[i * board.rows_count + j];
+                int value2 = local_col[i * board.rows_count + j + 1];
+                int value3 = local_col[i * board.rows_count + j + 2];
+                int value4 = local_col[i * board.rows_count + j + 3];
+
+                if (value1 == value4 && value2 == value3 && value1 != value2) {
+                    for (k = 0; k < board.rows_count; k++) {
+                        int single = local_col[i * board.rows_count + k];
+                        if (k != j && k != j + 1 && k != j + 2 && k != j + 3 && (single == value1 || single == value2)) {
+                            local_col_solution[i * board.rows_count + k] = BLACK;
+
+                            if (k - 1 >= 0) local_col_solution[i * board.rows_count + k - 1] = WHITE;
+                            if (k + 1 < board.rows_count) local_col_solution[i * board.rows_count + k + 1] = WHITE;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    int *row_solution, *col_solution;
+    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
+    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
+
+    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
+    Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
+
+    Board solution = combine_boards(row_board, col_board, false, rank, "Flanked Isolation");
+
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
     return solution;
@@ -680,21 +626,21 @@ Board mpi_corner_cases(Board board, int rank, int size) {
     return solution;
 }
 
-Board mpi_flanked_isolation(Board board, int rank, int size) {
-
+Board mpi_set_white(Board board, int rank, int size) {
+    
     /*
         RULE DESCRIPTION:
         
-        If you find two doubles packed, singles must be black
-
-        e.g. 2 3 3 2 ... 2 ... 3 --> 2 3 3 2 ... X ... X
+        When you have whited a cell, you can mark all the other cells with the same number in the row or column as black
+        
+        e.g. Suppose a whited 3. Then 2 O ... 3 --> 2 O ... X
     */
 
     int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row);
+    mpi_scatter_board(board, rank, size, ROWS, SOLUTION, &local_row, &counts_send_row, &displs_send_row);
 
     int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col);
+    mpi_scatter_board(board, rank, size, COLS, SOLUTION, &local_col, &counts_send_col, &displs_send_col);
 
     int i, j, k;
     int local_row_solution[counts_send_row[rank]];
@@ -703,52 +649,106 @@ Board mpi_flanked_isolation(Board board, int rank, int size) {
     memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
     memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
 
-    // For each local row, check if there is a flanked pair
-    for (i = 0; i < (counts_send_row[rank] / board.cols_count); i++) {
+    int starting_index = 0;
+
+    for (i = 0; i < rank; i++)
+        starting_index += counts_send_row[i];
+    
+    // For each local row, check if there is a white cell
+    int rows_count = (counts_send_row[rank] / board.cols_count);
+    for (i = 0; i < rows_count; i++) {
+        int grid_row_index = starting_index + i * board.cols_count;
         for (j = 0; j < board.cols_count; j++) {
+            if (local_row[i * board.cols_count + j] == WHITE) {
+                int value = board.grid[grid_row_index + j];
 
-            if (j < board.cols_count - 3) {
-                int value1 = local_row[i * board.cols_count + j];
-                int value2 = local_row[i * board.cols_count + j + 1];
-                int value3 = local_row[i * board.cols_count + j + 2];
-                int value4 = local_row[i * board.cols_count + j + 3];
+                for (k = 0; k < board.cols_count; k++) {
+                    if (board.grid[grid_row_index + k] == value && k != j) {
+                        local_row_solution[i * board.cols_count + k] = BLACK;
 
-                if (value1 == value4 && value2 == value3 && value1 != value2) {
-                    for (k = 0; k < board.cols_count; k++) {
-                        int single = local_row[i * board.cols_count + k];
-                        if (k != j && k != j + 1 && k != j + 2 && k != j + 3 && (single == value1 || single == value2)) {
-                            local_row_solution[i * board.cols_count + k] = BLACK;
-
-                            if (k - 1 >= 0) local_row_solution[i * board.cols_count + k - 1] = WHITE;
-                            if (k + 1 < board.cols_count) local_row_solution[i * board.cols_count + k + 1] = WHITE;
-                        }
+                        if (k - 1 >= 0) local_row_solution[i * board.cols_count + k - 1] = WHITE;
+                        if (k + 1 < board.cols_count) local_row_solution[i * board.cols_count + k + 1] = WHITE;
                     }
                 }
             }
         }
     }
 
-    // For each local column, check if there is a flanked pair
-    for (i = 0; i < (counts_send_col[rank] / board.rows_count); i++) {
+    Board TBoard = transpose(board);
+
+    // For each local column, check if triplet values are present
+    int cols_count = (counts_send_col[rank] / board.rows_count);
+    for (i = 0; i < cols_count; i++) {
+        int grid_col_index = starting_index + i * board.rows_count;
         for (j = 0; j < board.rows_count; j++) {
+            if (local_col[i * board.rows_count + j] == WHITE) {
+                int value = TBoard.grid[grid_col_index + j];
 
-            if (j < board.rows_count - 3) {
-                int value1 = local_col[i * board.rows_count + j];
-                int value2 = local_col[i * board.rows_count + j + 1];
-                int value3 = local_col[i * board.rows_count + j + 2];
-                int value4 = local_col[i * board.rows_count + j + 3];
+                for (k = 0; k < board.rows_count; k++) {
+                    if (TBoard.grid[grid_col_index + k] == value && k != j) {
+                        local_col_solution[i * board.rows_count + k] = BLACK;
 
-                if (value1 == value4 && value2 == value3 && value1 != value2) {
-                    for (k = 0; k < board.rows_count; k++) {
-                        int single = local_col[i * board.rows_count + k];
-                        if (k != j && k != j + 1 && k != j + 2 && k != j + 3 && (single == value1 || single == value2)) {
-                            local_col_solution[i * board.rows_count + k] = BLACK;
-
-                            if (k - 1 >= 0) local_col_solution[i * board.rows_count + k - 1] = WHITE;
-                            if (k + 1 < board.rows_count) local_col_solution[i * board.rows_count + k + 1] = WHITE;
-                        }
+                        if (k - 1 >= 0) local_col_solution[i * board.rows_count + k - 1] = WHITE;
+                        if (k + 1 < board.rows_count) local_col_solution[i * board.rows_count + k + 1] = WHITE;
                     }
                 }
+            }
+        }
+    }
+
+    int *row_solution, *col_solution;
+    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
+    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
+
+    Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution }; 
+    Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
+
+    Board solution = combine_boards(row_board, col_board, false, rank, "Set White");
+    
+    free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
+
+    return solution;
+}
+
+Board mpi_set_black(Board board, int rank, int size) {
+    
+    /*
+        RULE DESCRIPTION:
+        
+        When you have marked a black cell, all the cells around it must be white.
+
+        e.g. 2 X 2 --> O X O
+    */
+
+    int *local_row, *counts_send_row, *displs_send_row;
+    mpi_scatter_board(board, rank, size, ROWS, SOLUTION, &local_row, &counts_send_row, &displs_send_row);
+
+    int *local_col, *counts_send_col, *displs_send_col;
+    mpi_scatter_board(board, rank, size, COLS, SOLUTION, &local_col, &counts_send_col, &displs_send_col);
+
+    int i, j;
+    int local_row_solution[counts_send_row[rank]];
+    int local_col_solution[counts_send_col[rank]];
+
+    memset(local_row_solution, UNKNOWN, counts_send_row[rank] * sizeof(int));
+    memset(local_col_solution, UNKNOWN, counts_send_col[rank] * sizeof(int));
+
+    // For each local row, check if there is a white cell
+    for (i = 0; i < (counts_send_row[rank] / board.cols_count); i++) {
+        for (j = 0; j < board.cols_count; j++) {
+            if (local_row[i * board.cols_count + j] == BLACK) {                
+                if (j - 1 >= 0) local_row_solution[i * board.cols_count + j - 1] = WHITE;
+                if (j + 1 < board.cols_count) local_row_solution[i * board.cols_count + j + 1] = WHITE;
+            }
+        }
+    }
+
+    // For each local column, check if triplet values are present
+    for (i = 0; i < (counts_send_col[rank] / board.rows_count); i++) {
+        for (j = 0; j < board.rows_count; j++) {
+            if (local_col[i * board.rows_count + j] == BLACK) {
+                if (j - 1 >= 0) local_col_solution[i * board.rows_count + j - 1] = WHITE;
+                if (j + 1 < board.rows_count) local_col_solution[i * board.rows_count + j + 1] = WHITE;
             }
         }
     }
@@ -760,7 +760,7 @@ Board mpi_flanked_isolation(Board board, int rank, int size) {
     Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
     Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
 
-    Board solution = combine_boards(row_board, col_board, false, rank, "Flanked Isolation");
+    Board solution = combine_boards(row_board, col_board, false, rank, "Set Black");
 
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
