@@ -242,11 +242,14 @@ bool task_openmp_solution() {
 }
 */
 
-bool check_leaf(BCB *block, int thread_id, int threads_in_solution_space, int solution_space_id) {
+bool check_leaf(BCB *block, int thread_id, int threads_in_solution_space, int solution_space_id, bool *solution_space_ended) {
     bool leaf_found = next_leaf(board, block, &unknown_index, &unknown_index_length, &threads_in_solution_space, &thread_id);
 
     if (!leaf_found) {
         if (DEBUG) printf("Leaf not found\n");
+        *solution_space_ended = true;
+        fflush(stdout);
+        printf("[%d] Solution space ended\n", thread_id);
         fflush(stdout);
     } else {
         
@@ -307,6 +310,7 @@ void task_find_solution_for_real(BCB *block, int thread_id, int threads_in_solut
     fflush(stdout);
 
     bool skip_ask_for_sharing = false;
+    bool solution_space_ended = false;
     while(!terminated) {
         double start_time = omp_get_wtime();
 
@@ -351,7 +355,7 @@ void task_find_solution_for_real(BCB *block, int thread_id, int threads_in_solut
             }
         }
 
-        bool solution_found = check_leaf(block, thread_id, threads_in_solution_space, solution_space_id);
+        bool solution_found = check_leaf(block, thread_id, threads_in_solution_space, solution_space_id, &solution_space_ended);
 
         // TODO: get into other solution space
 
@@ -364,6 +368,9 @@ void task_find_solution_for_real(BCB *block, int thread_id, int threads_in_solut
             skip_ask_for_sharing = true;
             break;
         }
+
+        if (solution_space_ended)
+            break;
 
         #pragma omp taskyield
     }
