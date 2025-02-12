@@ -17,9 +17,7 @@
 /* ------------------ GLOBAL VARIABLES ------------------ */
 Board board;
 Queue solution_queue;
-
-// TODO: remove
-Queue leaf_queue;
+Queue *leaf_queues;
 
 // ----- Backtracking variables -----
 bool terminated = false;
@@ -106,10 +104,10 @@ void task_find_solution() {
     #pragma omp critical
     {
         thread_wait_time += omp_get_wtime() - thread_start;
-        if (!isEmpty(&leaf_queue)) {
-            current = dequeue(&leaf_queue);
-            current_found = true;
-        }
+        // if (!isEmpty(&leaf_queue)) {
+        //     current = dequeue(&leaf_queue);
+        //     current_found = true;
+        // }
     }
 
     if (!current_found) {
@@ -381,11 +379,11 @@ void task_find_solution_for_real(BCB *block, int thread_id, int threads_in_solut
 void find_solution_parallel() {
     int max_threads = omp_get_max_threads();
     int i, j;
+    double start_time = omp_get_wtime();
+    double wait_start;
     #pragma omp single
     {
         // double next_leaf_time_start, next_leaf_allocation_time_start;
-        double start_time = omp_get_wtime();
-        double wait_start;
         if (terminated) {
             if (DEBUG) printf("Solution found when building leaves\n");
         } else {
@@ -405,22 +403,22 @@ void find_solution_parallel() {
 
                 BCB block = dequeue(&solution_queue);
                 for (j = 0; j < threads_in_solution_space; j++) {
+                    
+                    BCB new_block = {
+                        .solution = malloc(board.rows_count * board.cols_count * sizeof(CellState)),
+                        .solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool))
+                    };
 
-                    #pragma omp task firstprivate(block, j, threads_in_solution_space, i)
-                    {
-                        BCB new_block = {
-                            .solution = malloc(board.rows_count * board.cols_count * sizeof(CellState)),
-                            .solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool))
-                        };
-                        
-                        int k, l;
-                        for (k = 0; k < board.rows_count; k++) {
-                            for (l = 0; l < board.cols_count; l++) {
-                                new_block.solution[k * board.cols_count + l] = block.solution[k * board.cols_count + l];
-                                new_block.solution_space_unknowns[k * board.cols_count + l] = block.solution_space_unknowns[k * board.cols_count + l];
-                            }
+                    int k, l;
+                    for (k = 0; k < board.rows_count; k++) {
+                        for (l = 0; l < board.cols_count; l++) {
+                            new_block.solution[k * board.cols_count + l] = block.solution[k * board.cols_count + l];
+                            new_block.solution_space_unknowns[k * board.cols_count + l] = block.solution_space_unknowns[k * board.cols_count + l];
                         }
-                        
+                    }
+                    
+                    #pragma omp task firstprivate(block, j, threads_in_solution_space, i, new_block)
+                    {
                         task_find_solution_for_real(&new_block, j, threads_in_solution_space, i);
                     }
                     
@@ -428,17 +426,16 @@ void find_solution_parallel() {
                     fflush(stdout);
                 }
             }
-            #pragma omp taskwait
         }
-        if (DEBUG) printf("Finished finding solution\n");
-        fflush(stdout);
-
-        master_time = omp_get_wtime() - start_time;
-
-        wait_start = omp_get_wtime();
-        #pragma omp taskwait
-        master_wait_time += omp_get_wtime() - wait_start;
     }
+    
+    if (DEBUG) printf("Finished finding solution\n");
+    fflush(stdout);
+
+    master_time = omp_get_wtime() - start_time;
+
+    wait_start = omp_get_wtime();
+    master_wait_time += omp_get_wtime() - wait_start;
 }
 
 void find_solution_serial() {
@@ -473,6 +470,61 @@ void find_solution_serial() {
     }
 }
 
+void task_find_solution_final(int thread_id, int threads_in_solution_space, int solutions_to_skip, int blocks_per_thread) {
+    Queue local_queue;
+    initializeQueue(&local_queue, blocks_per_thread);
+
+    // create local board
+    printf("[%d] Creating local queue\n", thread_id);
+    
+    int i;
+    #pragma omp critical
+    {
+        for(i = 0; i < blocks_per_thread; i++) {
+            BCB block = dequeue(&leaf_queues[thread_id]);
+            enqueue(&local_queue, &block);
+        }
+    }
+
+    int queue_size = getQueueSize(&local_queue);
+    printf("[%d] Local queue size: %d\n", thread_id, queue_size);
+    fflush(stdout);
+    if (queue_size > 1 && solutions_to_skip > 0) {
+        printf("[%d] ERROR: More than one block in local queue\n", thread_id);
+        exit(-1);
+    }
+
+    while(!terminated) {
+        if (isEmpty(&local_queue) || terminated) {
+            if (DEBUG) printf("[%d] Local queue is empty or terminated\n", thread_id);
+            fflush(stdout);
+            break;
+        }
+
+        BCB current = dequeue(&local_queue);
+        
+        bool leaf_found = next_leaf(board, &current, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
+        if (leaf_found) {
+            bool solution_found = check_hitori_conditions(board, &current, &dfs_time, &conditions_time);
+            if (solution_found) {
+                #pragma omp critical
+                {
+                    terminated = true;
+                    memcpy(board.solution, current.solution, board.rows_count * board.cols_count * sizeof(CellState));
+                }
+                if (DEBUG) printf("[%d] Solution found\n", thread_id);
+            } else {
+                enqueue(&local_queue, &current);
+            }
+        } else {
+            if (DEBUG) printf("[%d] One solution space ended\n", thread_id);
+            fflush(stdout);
+        }
+    }
+
+    // TODO: ask for sharing
+}
+
 bool task_openmp_solution_for_real() {
     // int RESUME_THRESHOLD = 4;
 
@@ -482,11 +534,12 @@ bool task_openmp_solution_for_real() {
     memset(individual_task_time, 0, max_threads * sizeof(double));
 
     if (DEBUG) printf("Solution spaces: %d\n", SOLUTION_SPACES);
+    fflush(stdout);
 
     #pragma omp parallel
     {
         // TODO: decide whether to change allocation of variables
-        int i;
+        int i, j;
         building_time = omp_get_wtime();
         #pragma omp single
         {
@@ -501,11 +554,54 @@ bool task_openmp_solution_for_real() {
         building_time = omp_get_wtime() - building_time;
 
         if (DEBUG) printf("Finished building leaves\n");
+        fflush(stdout);
 
-        if (max_threads > 1)
-            find_solution_parallel();
-        else
-            find_solution_serial();
+        #pragma omp single
+        {
+            
+            int count = 0;
+            for (i = 0; i < max_threads; i++) {
+                int blocks_per_thread = SOLUTION_SPACES / max_threads;
+                if (SOLUTION_SPACES % max_threads > i)
+                    blocks_per_thread++;
+                blocks_per_thread = blocks_per_thread < 1 ? 1 : blocks_per_thread;
+
+                int threads_per_block = max_threads / SOLUTION_SPACES;
+                if (max_threads % SOLUTION_SPACES > i)
+                    threads_per_block++;
+                threads_per_block = threads_per_block < 1 ? 1 : threads_per_block;
+
+                printf("Blocks per thread %d\n", blocks_per_thread);
+                printf("Threads per block %d\n", threads_per_block);
+                fflush(stdout);
+
+                // int iter = max_threads < SOLUTION_SPACES ? 1 : blocks_per_thread;
+                for (j = 0; j < blocks_per_thread; j++) {
+                    BCB block = dequeue(&solution_queue);
+                    // deepcopy of the block  TODO
+                    
+                    BCB new_block = {
+                        .solution = malloc(board.rows_count * board.cols_count * sizeof(CellState)),
+                        .solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool))
+                    };
+
+                    memcpy(new_block.solution, block.solution, board.rows_count * board.cols_count * sizeof(CellState));
+                    memcpy(new_block.solution_space_unknowns, block.solution_space_unknowns, board.rows_count * board.cols_count * sizeof(bool));
+
+                    enqueue(&solution_queue, &block);
+                    enqueue(&leaf_queues[i], &new_block);
+                }
+                
+                int solutions_to_skip = count / SOLUTION_SPACES;
+                printf("Starting task with %d %d %d\n", i, threads_per_block, solutions_to_skip);
+                fflush(stdout);
+                #pragma omp task firstprivate(i, threads_per_block, solutions_to_skip)
+                {
+                    task_find_solution_final(i, threads_per_block, solutions_to_skip, blocks_per_thread);
+                }
+                count++;
+            }
+        }
     }
 
     return terminated;
@@ -613,7 +709,17 @@ int main(int argc, char** argv) {
     
     memcpy(board.solution, pruned.solution, board.rows_count * board.cols_count * sizeof(CellState));
     initializeQueue(&solution_queue, SOLUTION_SPACES);
-    initializeQueue(&leaf_queue, LEAF_QUEUE_SIZE);
+    // initializeQueueArray(&leaf_queues, max_threads, SOLUTION_SPACES); TODO: fix this ???
+
+    leaf_queues = malloc(max_threads * sizeof(Queue));
+    for (i = 0; i < max_threads; i++) {
+        initializeQueue(&leaf_queues[i], SOLUTION_SPACES);
+    }
+
+    // print all addresses of the queues
+    for (i = 0; i < max_threads; i++) {
+        printf("Queue address %d: %p\n", i, (void*)&leaf_queues[i]);
+    }
 
     /*
         Compute the unknown cells indexes

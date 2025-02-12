@@ -467,7 +467,7 @@ bool hitori_mpi_solution() {
         backtracking_time += MPI_Wtime() - backtracking_start_time;
 
         double check_start_time = MPI_Wtime();
-        bool checked = check_hitori_conditions(board, &blocks[i], &dfs_time, &conditions_time);
+        bool checked = check_hitori_conditions(board, &blocks[i]);
         check_time += MPI_Wtime() - check_start_time;
         
         if (checked) {
@@ -497,6 +497,8 @@ bool hitori_mpi_solution() {
         send_message(MANAGER_RANK, &ask_work_request, ASK_FOR_WORK, -1, -1, false, W2M_MESSAGE);
     }
 
+    // printf("Processor %d finished building solution spaces\n", rank);
+
     while(!terminated) {
 
         if (rank == MANAGER_RANK) manager_check_messages();
@@ -513,7 +515,7 @@ bool hitori_mpi_solution() {
 
                 if (leaf_found) {
                     double check_start_time_2 = MPI_Wtime();
-                    bool checked = check_hitori_conditions(board, &current_solution, &dfs_time, &conditions_time);
+                    bool checked = check_hitori_conditions(board, &current_solution);
                     check_time += MPI_Wtime() - check_start_time_2;
                     if (checked) {
                         memcpy(board.solution, current_solution.solution, board.rows_count * board.cols_count * sizeof(CellState));

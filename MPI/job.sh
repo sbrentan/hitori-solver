@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -l select=4:ncpus=2:mem=2gb
+#PBS -l select=2:ncpus=1:mem=2gb
 #PBS -l place=scatter
 #PBS -l walltime=0:20:00
 #PBS -q short_cpuQ
@@ -10,4 +10,4 @@ cd $PBS_O_WORKDIR
 
 module load mpich-3.2
 
-mpirun.actual -n 8 ./build/main.out input-20x20.txt
+mpirun.actual -n 2 ./build/main.out test-25x25.txt

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../include/queue.h"
 
@@ -10,6 +11,20 @@ void initializeQueue(Queue* q, int size) {
     q->rear = -1;
     q->size = size;
     // TODO: free all the items in the queue
+}
+
+void initializeQueueArray(Queue* queue_array, int array_size, int queue_size) {
+
+    queue_array = malloc(array_size * sizeof(Queue));
+
+    if (queue_array == NULL) {
+        printf("Memory allocation error\n");
+        exit(-1);
+    }
+
+    int i;
+    for (i = 0; i < array_size; i++)
+        initializeQueue(&queue_array[i], queue_size);
 }
 
 int isFull(Queue* q) {
@@ -81,4 +96,58 @@ BCB dequeue(Queue* q) {
     }
     // Return the dequeued data
     return data;
+}
+
+Queue* copyQueue(Queue* original, Board board) {
+    if (original == NULL) {
+        return NULL;
+    }
+
+    // Allocate memory for the new Queue structure.
+    Queue* copy = (Queue*) malloc(sizeof(Queue));
+    
+    if (copy == NULL) {
+        printf("Memory allocation error\n");
+        exit(-1);
+    }
+
+    // Copy the size and indices.
+    copy->size  = original->size;
+    copy->front = original->front;
+    copy->rear  = original->rear;
+
+    printf("Queue size: %d\n", copy->size);
+    printf("Queue front: %d\n", copy->front);
+    printf("Queue rear: %d\n", copy->rear);
+
+    // Allocate a new array for the items.
+    copy->items = (BCB*) malloc(copy->size * sizeof(BCB));
+    
+    if (copy->items == NULL) {
+        printf("Memory allocation error\n");
+        exit(-1);
+    }
+
+    int i;
+    for (i = 0; i < copy->size; i++) {
+
+        printf("Copying item %d of %d\n", i, copy->size);
+
+        BCB item = {
+            .solution = malloc(board.rows_count * board.cols_count * sizeof(int)),
+            .solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool))
+        };
+
+        if (item.solution == NULL || item.solution_space_unknowns == NULL) {
+            printf("Memory allocation error\n");
+            exit(-1);
+        }
+
+        memcpy(item.solution, original->items[i].solution, board.rows_count * board.cols_count * sizeof(int));
+        memcpy(item.solution_space_unknowns, original->items[i].solution_space_unknowns, board.rows_count * board.cols_count * sizeof(bool));
+
+        copy->items[i] = item;
+    }
+
+    return copy;
 }

@@ -108,23 +108,23 @@ bool check_hitori_conditions(Board board, BCB* block) {
     }
 
     // Check if the number of white cells is equal to the number of connected white cells (meaning a single continuous area)
-    // return bfs_white_cells(board, block, visited, row, col) == white_cells_count;
+    return bfs_white_cells(board, block, visited, row, col) == white_cells_count;
     // Rule 3: When completed, all un-shaded (white) squares create a single continuous area
-    return dfs_white_cells(board, block, visited, row, col) == white_cells_count;
+    // return dfs_white_cells(board, block, visited, row, col) == white_cells_count;
 }
 
-bool check_hitori_conditions(Board board, BCB* block, double* dfs_time, double* conditions_time) {
+// bool check_hitori_conditions(Board board, BCB* block, double* dfs_time, double* conditions_time) {
     
-    // Rule 1: No unshaded number appears in a row or column more than once
-    // Rule 2: Shaded cells cannot be adjacent, although they can touch at a corner
-    //  - Already checked in is_cell_state_valid while building the leaf
+//     // Rule 1: No unshaded number appears in a row or column more than once
+//     // Rule 2: Shaded cells cannot be adjacent, although they can touch at a corner
+//     //  - Already checked in is_cell_state_valid while building the leaf
 
-    // Rule 3: When completed, all un-shaded (white) squares create a single continuous area
+//     // Rule 3: When completed, all un-shaded (white) squares create a single continuous area
 
-    double start_dfs_time = MPI_Wtime();
-    bool result = all_white_cells_connected(board, block);
-    *dfs_time += MPI_Wtime() - start_dfs_time;
-    if (!result) return false;
+//     double start_dfs_time = MPI_Wtime();
+//     bool result = all_white_cells_connected(board, block);
+//     *dfs_time += MPI_Wtime() - start_dfs_time;
+//     if (!result) return false;
 
-    return true;
-}
+//     return true;
+// }

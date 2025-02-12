@@ -134,11 +134,14 @@ void init_solution_space(Board board, BCB* block, int solution_space_id, int **u
             // Validate if cell_choice (black or white) here is valid
             //      If not valid, use fixed choice and do not decrease solution_space_id
             //      If neither are valid, set to unknown (then the loop will change it)
+            int thread_num = omp_get_thread_num();
             if (!is_cell_state_valid(board, block, i, uk_idx, cell_choice)) {
                 cell_choice = abs(cell_choice - 1);
                 if (!is_cell_state_valid(board, block, i, uk_idx, cell_choice)) {
                     cell_choice = UNKNOWN;
                     continue;
+                } else {
+                    printf("[%d] Cell %d %d is invalid, changing to %d\n", thread_num, i, uk_idx, cell_choice);
                 }
             }
 
