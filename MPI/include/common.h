@@ -6,7 +6,7 @@
 #define DEBUG false
 #define INPUT_PATH "../test-cases/inputs/"
 #define MAX_BUFFER_SIZE 2048
-#define SOLUTION_SPACES 4
+#define SOLUTION_SPACES 8
 #define MANAGER_RANK 0
 
 #define W2M_MESSAGE 0

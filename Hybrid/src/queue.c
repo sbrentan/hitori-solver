@@ -4,15 +4,17 @@
 #include "../include/queue.h"
 
 // Function to initialize the queue
-void initializeQueue(Queue* q) {
+void initializeQueue(Queue* q, int size) {
+    q->items = (BCB*) malloc(size * sizeof(BCB));
     q->front = -1;
     q->rear = -1;
+    q->size = size;
     // TODO: free all the items in the queue
 }
 
 int isFull(Queue* q) {
     // If the next position is the front, the queue is full
-    return (q->rear + 1) % SOLUTION_SPACES == q->front;
+    return (q->rear + 1) % q->size == q->front;
 }
 
 int getQueueSize(Queue* q) {
@@ -21,7 +23,7 @@ int getQueueSize(Queue* q) {
     // If the front is behind the rear, return the difference
     if (q->front <= q->rear) return q->rear - q->front + 1;
     // If the front is ahead of the rear, return the difference plus the size of the queue
-    return SOLUTION_SPACES - q->front + q->rear + 1;
+    return q->size - q->front + q->rear + 1;
 } 
 
 // Function to check if the queue is empty
@@ -42,7 +44,7 @@ void enqueue(Queue *q, BCB *block) {
         q->front = 0;
     }
     // Add the data to the queue and move the rear pointer
-    q->rear = (q->rear + 1) % SOLUTION_SPACES;
+    q->rear = (q->rear + 1) % q->size;
     q->items[q->rear] = *block;
     //printf("Element %lld inserted\n", value);
 }
@@ -75,7 +77,7 @@ BCB dequeue(Queue* q) {
     else {
         // Otherwise, move the front pointer to the next
         // position
-        q->front = (q->front + 1) % SOLUTION_SPACES;
+        q->front = (q->front + 1) % q->size;
     }
     // Return the dequeued data
     return data;

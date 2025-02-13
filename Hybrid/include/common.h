@@ -8,6 +8,7 @@
 #define MAX_BUFFER_SIZE 2048
 #define SOLUTION_SPACES 4
 #define MANAGER_RANK 0
+#define MANAGER_THREAD 0
 
 #define W2M_MESSAGE 0
 #define M2W_MESSAGE 1

@@ -19,14 +19,19 @@
 /* ------------------ GLOBAL VARIABLES ------------------ */
 Board board;
 Queue solution_queue;
+Queue *leaf_queues;
 int rank, size;
 
 // ----- Backtracking variables -----
 bool terminated = false;
 bool is_my_solution_spaces_ended = false;
-int solutions_to_skip = 0;
-int total_processes_in_solution_space = 1;
+int solutions_to_skip = 0; // TODO: remove?
+int total_processes_in_solution_space = 1; // TODO: remove?
+
+int process_solution_spaces, starting_solutions_to_skip;
+int *total_processes_in_solution_spaces;
 int *unknown_index, *unknown_index_length, *processes_in_my_solution_space;
+BCB *received_block = NULL;
 
 // ----- Common variables -----
 MPI_Datatype MPI_MESSAGE;
@@ -36,6 +41,10 @@ Message manager_message, receive_work_message, refresh_solution_space_message, f
 MPI_Request manager_request;   // Request for the workers to contact the manager
 MPI_Request receive_work_request, refresh_solution_space_request, finished_solution_space_request; // dedicated worker-worker
 int *receive_work_buffer, *send_work_buffer;
+
+bool send_status_update_message = false;
+bool send_terminate_message = false;
+// int not_ended_solution_spaces;
 
 // ----- Manager variables -----
 Message *worker_messages;
@@ -171,8 +180,8 @@ void worker_receive_work(int source) {
         return;
     }
 
-    solutions_to_skip = receive_work_message.data1;
-    total_processes_in_solution_space = receive_work_message.data2;
+    starting_solutions_to_skip = receive_work_message.data1;
+    total_processes_in_solution_spaces[0] = receive_work_message.data2;
     printf("[INFO] Process %d received work from process %d with solutions to skip %d and total processes in solution space %d\n", rank, source, solutions_to_skip, total_processes_in_solution_space);
 
     // --- receive buffer
@@ -185,32 +194,52 @@ void worker_receive_work(int source) {
     if (terminated) return;
 
     BCB block_to_receive;
-    if (buffer_to_block(receive_work_buffer, &block_to_receive))
-        enqueue(&solution_queue, &block_to_receive);
+    if (buffer_to_block(receive_work_buffer, &block_to_receive)) {
+        received_block = &block_to_receive;
+        #pragma omp atomic write
+        terminated = true;
+    }
 
     // --- open refresh solution space message channel
-    if (total_processes_in_solution_space > 1) {
+    if (total_processes_in_solution_spaces[0] > 1) {
         receive_message(&refresh_solution_space_message, source, &refresh_solution_space_request, W2W_MESSAGE * 4);
         if (!is_my_solution_spaces_ended)
             printf("[ERROR] Process %d received a refresh solution space message from process %d while not solution space ended\n", rank, source);
     }
-    else 
+    else {
+        printf("[WARNING] Should not happen in hybrid approach");
         is_my_solution_spaces_ended = false;
+    }
 }
 
 void worker_send_work(int destination, int expected_queue_size) {
     
-    int queue_size = getQueueSize(&solution_queue);
-    bool invalid_request = terminated || is_my_solution_spaces_ended || queue_size == 0 || expected_queue_size != queue_size;
+    // int queue_size = getQueueSize(&solution_queue);
+    // TODO: change
+    return;
+    
+    int not_ended_solution_spaces = 0;
+    int solution_space_to_send = -1;
+    for (int i = 0; i < process_solution_spaces; i++) {
+        if (total_processes_in_solution_spaces[i] > 0) {
+            if (solution_space_to_send == -1 || total_processes_in_solution_spaces[i] < total_processes_in_solution_spaces[solution_space_to_send])
+                solution_space_to_send = i;
+            not_ended_solution_spaces++;
+        }
+    }
+    int max_threads = omp_get_max_threads();
+
+    bool invalid_request = terminated || is_my_solution_spaces_ended || not_ended_solution_spaces == 0 || expected_queue_size != not_ended_solution_spaces;
     if (invalid_request)
-        printf("[ERROR] Process %d sending invalid send work request to process %d [%d, %d, %d, %d]\n", rank, destination, terminated, is_my_solution_spaces_ended, queue_size, expected_queue_size);
+        printf("[ERROR] Process %d sending invalid send work request to process %d [%d, %d, %d, %d]\n", rank, destination, terminated, is_my_solution_spaces_ended, not_ended_solution_spaces, expected_queue_size);
 
     BCB block_to_send;
     int solutions_to_skip_to_send = 0;
     int total_processes_in_solution_space_to_send = 0;
 
     if (!invalid_request) {
-        if (queue_size == 1) {
+        if (not_ended_solution_spaces == 1) {
+            // TODO: change
             block_to_send = peek(&solution_queue);
             block_to_buffer(&block_to_send, &send_work_buffer);
             solutions_to_skip_to_send = total_processes_in_solution_space;
@@ -236,7 +265,8 @@ void worker_send_work(int destination, int expected_queue_size) {
                 send_message(i, &request, REFRESH_SOLUTION_SPACE, ++count, total_processes_in_solution_space, false, W2W_MESSAGE * 4);
             }
         }
-        else if(queue_size > 1) {
+        else if(not_ended_solution_spaces > 1) {
+            // TODO: change
             block_to_send = dequeue(&solution_queue);
             block_to_buffer(&block_to_send, &send_work_buffer);
             solutions_to_skip_to_send = 0;
@@ -257,11 +287,40 @@ void worker_send_work(int destination, int expected_queue_size) {
 }
 
 void worker_check_messages() {
+    if(send_status_update_message) {
+        send_status_update_message = false;
+        MPI_Request status_update_request = MPI_REQUEST_NULL;
+        int not_ended_solution_spaces = 0;
+        for (int i = 0; i < process_solution_spaces; i++) {
+            if (total_processes_in_solution_spaces[i] > 0)
+                not_ended_solution_spaces++;
+        }
+        int max_threads = omp_get_max_threads();
+        
+        // TODO: check max_threads as data 2
+        if (not_ended_solution_spaces > 0)
+            send_message(MANAGER_RANK, &status_update_request, STATUS_UPDATE, not_ended_solution_spaces, max_threads, false, W2M_MESSAGE);
+        else {
+            is_my_solution_spaces_ended = true;
+            printf("Processor %d is asking for work\n", rank);
+            MPI_Request ask_work_request = MPI_REQUEST_NULL;
+            send_message(MANAGER_RANK, &ask_work_request, ASK_FOR_WORK, -1, -1, false, W2M_MESSAGE);
+        }
+    }
+    if (send_terminate_message) {
+        send_terminate_message = false;
+        MPI_Request terminate_request = MPI_REQUEST_NULL;
+        send_message(MANAGER_RANK, &terminate_request, TERMINATE, -1, -1, false, W2M_MESSAGE);
+        #pragma omp atomic write
+        terminated = true;
+    }
+
     int flag = 1;
     MPI_Status status;
     while(flag) {
         flag = 0;
         // printf("[%d] Testing\n", rank);
+        #pragma omp critical
         MPI_Test(&manager_request, &flag, &status);
         // printf("[%d] Finished testing\n", rank);
         if (flag) {
@@ -309,7 +368,8 @@ void worker_check_messages() {
                 if (terminated) return;
 
                 BCB new_block;
-                initializeQueue(&solution_queue);
+                // TODO: change
+                initializeQueue(&solution_queue, SOLUTION_SPACES);
                 if (buffer_to_block(refresh_solution_space_buffer, &new_block))
                     enqueue(&solution_queue, &new_block);
             }
@@ -402,6 +462,7 @@ void manager_check_messages() {
     MPI_Status status;
     while(flag) {
         flag = 0;
+        #pragma omp critical
         MPI_Testany(size, worker_requests, &sender_id, &flag, &status);
 
         if (flag) {
@@ -706,13 +767,86 @@ bool check_leaf(BCB *block, int thread_id, int threads_in_solution_space, int so
     return false;
 }
 
+
+void task_find_solution_final(int thread_id, int threads_in_solution_space, int solutions_to_skip, int blocks_per_thread) {
+    Queue local_queue;
+    initializeQueue(&local_queue, blocks_per_thread);
+
+    // TODO: create local board
+    printf("[%d] Creating local queue\n", thread_id);
+    
+    int i;
+    #pragma omp critical
+    {
+        for(i = 0; i < blocks_per_thread; i++) {
+            BCB block = dequeue(&leaf_queues[thread_id]);
+            enqueue(&local_queue, &block);
+        }
+    }
+
+    int queue_size = getQueueSize(&local_queue);
+    printf("[%d] Local queue size: %d\n", thread_id, queue_size);
+    fflush(stdout);
+    if (queue_size > 1 && solutions_to_skip > 0) {
+        printf("[%d] ERROR: More than one block in local queue\n", thread_id);
+        exit(-1);
+    }
+
+    int queue_size;
+    while(!terminated) {
+        
+        if (thread_id == MANAGER_THREAD) {
+            if (rank == MANAGER_RANK) manager_check_messages();
+            worker_check_messages(&solution_queue);
+        }
+
+        queue_size = getQueueSize(&local_queue);
+        if ((thread_id != MANAGER_THREAD && queue_size == 0) || terminated) {
+            if (DEBUG) printf("[%d] Local queue is empty or terminated\n", thread_id);
+            fflush(stdout);
+            break;
+        }
+
+        if (queue_size > 0) {
+            BCB current = dequeue(&local_queue);
+            
+            bool leaf_found = next_leaf(board, &current, &unknown_index, &unknown_index_length, &threads_in_solution_space, &solutions_to_skip);
+            if (leaf_found) {
+                bool solution_found = check_hitori_conditions(board, &current);
+                if (solution_found) {
+                    #pragma omp atomic write
+                    send_terminate_message = true;
+                    
+                    if (DEBUG) printf("[%d] Solution found\n", thread_id);
+                    if (thread_id != MANAGER_THREAD)
+                        break;
+                } else {
+                    enqueue(&local_queue, &current);
+                }
+            } else {
+
+                #pragma omp critical
+                {
+                    total_processes_in_solution_spaces[thread_id % process_solution_spaces] -= 1;
+                    if (total_processes_in_solution_spaces[thread_id % process_solution_spaces] == 0) {
+                        send_status_update_message = true;
+                    }
+                }
+                
+                if (DEBUG) printf("[%d] One solution space ended\n", thread_id);
+                fflush(stdout);
+            }
+        }
+    }
+}
+
 /* ------------------ MAIN ------------------ */
 
 bool hitori_mpi_solution() {
     
     int max_threads = omp_get_max_threads();
 
-    int i, count = 0;
+    int i, j, count = 0;
     // int solution_space_manager[SOLUTION_SPACES];
     int my_solution_spaces[SOLUTION_SPACES];
     
@@ -736,7 +870,6 @@ bool hitori_mpi_solution() {
     #pragma omp parallel
     {
         // TODO: decide whether to change allocation of variables
-        int i;
         #pragma omp single
         {
             for (i = 0; i < count; i++) {
@@ -759,6 +892,7 @@ bool hitori_mpi_solution() {
         return true;
     }
     
+    // TODO: check numbers when threads > SOLUTION SPACES and status update message
     int queue_size = getQueueSize(&solution_queue);
     if (queue_size > 0 && queue_size < count) {
         if (DEBUG) printf("Processor %d is sending status update\n", rank);
@@ -766,50 +900,134 @@ bool hitori_mpi_solution() {
         send_message(MANAGER_RANK, &status_update_request, STATUS_UPDATE, queue_size, 1, false, W2M_MESSAGE);
     } else if (queue_size == 0) {
         if (DEBUG) printf("Processor %d is asking for work\n", rank);
-        // TODO: restore
-        // is_my_solution_spaces_ended = true;
-        // MPI_Request ask_work_request = MPI_REQUEST_NULL;
-        // send_message(MANAGER_RANK, &ask_work_request, ASK_FOR_WORK, -1, -1, false, W2M_MESSAGE);
+        is_my_solution_spaces_ended = true;
+        MPI_Request ask_work_request = MPI_REQUEST_NULL;
+        send_message(MANAGER_RANK, &ask_work_request, ASK_FOR_WORK, -1, -1, false, W2M_MESSAGE);
     }
-    
-    bool leaf_found = false;
-    while(!terminated) {
 
-        if (rank == MANAGER_RANK) manager_check_messages();
-        worker_check_messages(&solution_queue);
+    starting_solutions_to_skip = 0;
+    while(!terminated)
+    {
+        #pragma omp parallel
+        {
+            #pragma omp single
+            {
+                // not_ended_solution_spaces = queue_size;
+                process_solution_spaces = queue_size;
+                total_processes_in_solution_spaces = calloc(process_solution_spaces, sizeof(int));
 
-        if (!terminated) {
-            queue_size = getQueueSize(&solution_queue);
-            if (queue_size > 0) {
-                BCB current_solution = dequeue(&solution_queue);
+                if (process_solution_spaces > 1 && starting_solutions_to_skip != 0) {
+                    printf("[ERROR] Starting solutions to skip is not 0\n");
+                    fflush(stdout);
+                }
 
-                leaf_found = next_leaf(board, &current_solution, &unknown_index, &unknown_index_length, &total_processes_in_solution_space, &solutions_to_skip);
+                if (process_solution_spaces > 0) {
+                    int count = 0;
+                    for (i = 0; i < max_threads; i++) {
+                        int blocks_per_thread = process_solution_spaces / max_threads;
+                        if (process_solution_spaces % max_threads > i)
+                            blocks_per_thread++;
+                        blocks_per_thread = blocks_per_thread < 1 ? 1 : blocks_per_thread;
 
-                if (leaf_found) {
-                    if (check_hitori_conditions(board, &current_solution)) {
-                        memcpy(board.solution, current_solution.solution, board.rows_count * board.cols_count * sizeof(CellState));
-                        terminated = true;
-                        MPI_Request terminate_message_request = MPI_REQUEST_NULL;
-                        send_message(MANAGER_RANK, &terminate_message_request, TERMINATE, rank, -1, false, W2M_MESSAGE);
+                        int threads_per_block = max_threads / process_solution_spaces;
+                        if (max_threads % process_solution_spaces > i)
+                            threads_per_block++;
+                        threads_per_block = threads_per_block < 1 ? 1 : threads_per_block;
+
+                        printf("Blocks per thread %d\n", blocks_per_thread);
+                        printf("Threads per block %d\n", threads_per_block);
+                        fflush(stdout);
+
+                        // int iter = max_threads < process_solution_spaces ? 1 : blocks_per_thread;
+                        for (j = 0; j < blocks_per_thread; j++) {
+                            BCB block = dequeue(&solution_queue);
+                            
+                            BCB new_block = {
+                                .solution = malloc(board.rows_count * board.cols_count * sizeof(CellState)),
+                                .solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool))
+                            };
+
+                            memcpy(new_block.solution, block.solution, board.rows_count * board.cols_count * sizeof(CellState));
+                            memcpy(new_block.solution_space_unknowns, block.solution_space_unknowns, board.rows_count * board.cols_count * sizeof(bool));
+
+                            enqueue(&solution_queue, &block);
+                            enqueue(&leaf_queues[i], &new_block);
+                        }
+                        
+                        int solutions_to_skip = (count / process_solution_spaces) + starting_solutions_to_skip;
+                        printf("Starting task with %d %d %d\n", i, threads_per_block, solutions_to_skip);
+                        fflush(stdout);
+                        total_processes_in_solution_spaces[i % process_solution_spaces] = threads_per_block;
+                        #pragma omp task firstprivate(i, threads_per_block, solutions_to_skip)
+                        {
+                            task_find_solution_final(i, threads_per_block, solutions_to_skip, blocks_per_thread);
+                        }
+                        count++;
+                    }
+                }
+                else {
+                    total_processes_in_solution_spaces = calloc(1, sizeof(int));
+                    while(!terminated) {
                         if (rank == MANAGER_RANK) manager_check_messages();
-                        return true;
-                    } else
-                        enqueue(&solution_queue, &current_solution);
-                } else {
-                    // send update status to manager
-                    if (queue_size > 1) {
-                        MPI_Request status_update_request = MPI_REQUEST_NULL;
-                        send_message(MANAGER_RANK, &status_update_request, STATUS_UPDATE, queue_size - 1, 1, false, W2M_MESSAGE);
-                    } else if (queue_size == 1) {  // now 0
-                        is_my_solution_spaces_ended = true;
-                        printf("Processor %d is asking for work\n", rank);
-                        MPI_Request ask_work_request = MPI_REQUEST_NULL;
-                        send_message(MANAGER_RANK, &ask_work_request, ASK_FOR_WORK, -1, -1, false, W2M_MESSAGE);
+                        worker_check_messages(&solution_queue);
                     }
                 }
             }
         }
+
+        if (received_block != NULL) {
+            printf("Received block\n");
+            // TODO: add received_block to solution_queue
+            queue_size = 1;
+            initializeQueue(&solution_queue, SOLUTION_SPACES);
+            enqueue(&solution_queue, received_block);
+            received_block = NULL;
+        } else {
+            printf("Received block is NULL\n");
+        }
+        fflush(stdout);
     }
+
+
+    
+    // bool leaf_found = false;
+    // while(!terminated) { 
+
+    //     if (rank == MANAGER_RANK) manager_check_messages();
+    //     worker_check_messages(&solution_queue);
+
+    //     if (!terminated) {
+    //         queue_size = getQueueSize(&solution_queue);
+    //         if (queue_size > 0) {
+    //             BCB current_solution = dequeue(&solution_queue);
+
+    //             leaf_found = next_leaf(board, &current_solution, &unknown_index, &unknown_index_length, &total_processes_in_solution_space, &solutions_to_skip);
+
+    //             if (leaf_found) {
+    //                 if (check_hitori_conditions(board, &current_solution)) {
+    //                     memcpy(board.solution, current_solution.solution, board.rows_count * board.cols_count * sizeof(CellState));
+    //                     terminated = true;
+    //                     MPI_Request terminate_message_request = MPI_REQUEST_NULL;
+    //                     send_message(MANAGER_RANK, &terminate_message_request, TERMINATE, rank, -1, false, W2M_MESSAGE);
+    //                     if (rank == MANAGER_RANK) manager_check_messages();
+    //                     return true;
+    //                 } else
+    //                     enqueue(&solution_queue, &current_solution);
+    //             } else {
+    //                 // send update status to manager
+    //                 if (queue_size > 1) {
+    //                     MPI_Request status_update_request = MPI_REQUEST_NULL;
+    //                     send_message(MANAGER_RANK, &status_update_request, STATUS_UPDATE, queue_size - 1, 1, false, W2M_MESSAGE);
+    //                 } else if (queue_size == 1) {  // now 0
+    //                     is_my_solution_spaces_ended = true;
+    //                     printf("Processor %d is asking for work\n", rank);
+    //                     MPI_Request ask_work_request = MPI_REQUEST_NULL;
+    //                     send_message(MANAGER_RANK, &ask_work_request, ASK_FOR_WORK, -1, -1, false, W2M_MESSAGE);
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     return false;
 }
@@ -830,6 +1048,8 @@ int main(int argc, char** argv) {
 
     printf("Hello, world! I am process %d of %d on %s\n", rank, size, hostname);
     fflush(stdout);
+
+    int max_threads = omp_get_max_threads();
 
     /*
         Type of placement according to the implementation
@@ -865,6 +1085,7 @@ int main(int argc, char** argv) {
 
     double pruning_start_time = MPI_Wtime();
 
+    int i;
     if (rank == MANAGER_RANK) {
 
         Board (*techniques[])(Board) = {
@@ -875,7 +1096,6 @@ int main(int argc, char** argv) {
             corner_cases
         };
 
-        int i;
         int num_techniques = sizeof(techniques) / sizeof(techniques[0]);
         
         int nt = omp_get_max_threads();
@@ -932,8 +1152,13 @@ int main(int argc, char** argv) {
         Initialize the backtracking variables
     */
     
-    initializeQueue(&solution_queue);
+    initializeQueue(&solution_queue, SOLUTION_SPACES);
     init_requests_and_messages();
+
+    leaf_queues = malloc(max_threads * sizeof(Queue));
+    for (i = 0; i < max_threads; i++) {
+        initializeQueue(&leaf_queues[i], SOLUTION_SPACES);
+    }
 
     /*
         Compute the unknown cells indexes

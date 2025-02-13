@@ -3,10 +3,10 @@
 
 #include <stdbool.h>
 
-#define DEBUG 1
+#define DEBUG 0
 #define INPUT_PATH "../test-cases/inputs/"
 #define MAX_BUFFER_SIZE 2048
-#define SOLUTION_SPACES 4
+#define SOLUTION_SPACES 16
 #define LEAF_QUEUE_SIZE 20
 
 typedef enum CellState {

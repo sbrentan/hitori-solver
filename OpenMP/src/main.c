@@ -474,7 +474,7 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
     Queue local_queue;
     initializeQueue(&local_queue, blocks_per_thread);
 
-    // create local board
+    // TODO: create local board
     printf("[%d] Creating local queue\n", thread_id);
     
     int i;
