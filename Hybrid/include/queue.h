@@ -3,7 +3,7 @@
 
 #include "common.h"
 
-void initializeQueue(Queue* q, int capacity);
+void initializeQueue(Queue* q, int size);
 int isFull(Queue* q);
 int getQueueSize(Queue* q);
 bool isEmpty(Queue* q);

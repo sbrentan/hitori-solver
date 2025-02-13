@@ -3,10 +3,10 @@
 
 #include <stdbool.h>
 
-#define DEBUG 1
+#define DEBUG 0
 #define INPUT_PATH "../test-cases/inputs/"
 #define MAX_BUFFER_SIZE 2048
-#define SOLUTION_SPACES 4
+#define SOLUTION_SPACES 16
 #define MANAGER_RANK 0
 #define MANAGER_THREAD 0
 
@@ -52,9 +52,10 @@ typedef struct BCB {
 } BCB;
 
 typedef struct Queue {
-    BCB items[SOLUTION_SPACES];
+    BCB *items;
     int front;
     int rear;
+    int size;
 } Queue;
 
 typedef enum MessageType {
