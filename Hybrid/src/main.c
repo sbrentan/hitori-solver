@@ -78,6 +78,7 @@ bool buffer_to_block(int *buffer, BCB *block) {
 }
 
 void receive_message(Message *message, int source, MPI_Request *request, int tag) {
+    if (size == 1) return;
     
     if (omp_get_thread_num() != MANAGER_THREAD) {
         printf("[ERROR] Process %d got invalid thread number %d while receiving\n", rank, omp_get_thread_num());
@@ -104,6 +105,7 @@ void receive_message(Message *message, int source, MPI_Request *request, int tag
 }
 
 void send_message(int destination, MPI_Request *request, MessageType type, int data1, int data2, bool invalid, int tag) {
+    if (size == 1) return;
     if (omp_get_thread_num() != MANAGER_THREAD) {
         printf("[ERROR] Process %d got invalid thread number %d while sending\n", rank, omp_get_thread_num());
         return;
@@ -181,6 +183,7 @@ void init_requests_and_messages() {
 }
 
 void worker_receive_work(int source) {
+    if (size == 1) return;
     int flag = 0;
     
     // --- receive initial message
@@ -228,6 +231,7 @@ void worker_receive_work(int source) {
 }
 
 void worker_send_work(int destination, int expected_queue_size) {
+    if (size == 1) return;
     
     // int queue_size = getQueueSize(&solution_queue);
     // TODO: change
@@ -303,6 +307,7 @@ void worker_send_work(int destination, int expected_queue_size) {
 }
 
 void worker_check_messages() {
+    if (size == 1) return;
     if (omp_get_thread_num() != MANAGER_THREAD) {
         printf("[ERROR] Process %d got invalid thread number %d\n", rank, omp_get_thread_num());
         return;
@@ -407,6 +412,7 @@ void worker_check_messages() {
 
 MPI_Request send_worker_request = MPI_REQUEST_NULL;
 void manager_consume_message(Message *message, int source) {
+    if (size == 1) return;
     printf("[INFO] Process %d (manager) received a message from process %d {%d}\n", rank, source, message->type);
     int i; //sender_id;
     
@@ -485,6 +491,7 @@ void manager_consume_message(Message *message, int source) {
 }
 
 void manager_check_messages() {
+    if (size == 1) return;
     if (omp_get_thread_num() != MANAGER_THREAD) {
         printf("[ERROR] Manager %d got invalid thread number %d\n", rank, omp_get_thread_num());
         return;
@@ -512,6 +519,7 @@ void manager_check_messages() {
 }
 
 void wait_for_message(MPI_Request *request) {
+    if (size == 1) return;
     int flag = 0;
     while(!flag && !terminated) {
         MPI_Test(request, &flag, MPI_STATUS_IGNORE);
@@ -544,7 +552,8 @@ void task_build_solution_space(int solution_space_id){
                 terminated = true;
                 memcpy(board.solution, block.solution, board.rows_count * board.cols_count * sizeof(CellState));
             }
-            if (DEBUG) printf("[%d - %d] Solution found\n", rank, thread_num);
+            double time = omp_get_wtime();
+            if (DEBUG) printf("[%d - %d] Solution found %f\n", rank, thread_num, time);
             fflush(stdout);
         } else {
             #pragma omp critical
@@ -560,7 +569,7 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
     initializeQueue(&local_queue, blocks_per_thread);
 
     // TODO: create local board
-    printf("[%d] Creating local queue\n", thread_id);
+    printf("[%d] Creating local queue %f\n", thread_id, omp_get_wtime());
     
     int i;
     #pragma omp critical
@@ -572,7 +581,7 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
     }
 
     int queue_size = getQueueSize(&local_queue);
-    printf("[%d] Local queue size: %d\n", thread_id, queue_size);
+    printf("[%d] Local queue size: %d %f\n", thread_id, queue_size, omp_get_wtime());
     fflush(stdout);
     if (queue_size > 1 && solutions_to_skip > 0) {
         printf("[%d] ERROR: More than one block in local queue\n", thread_id);
@@ -606,7 +615,9 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
                     process_is_solver = true;
                     memcpy(board.solution, current.solution, board.rows_count * board.cols_count * sizeof(CellState));
 
-                    printf("[%d] [%d] Solution found\n", rank, thread_id);
+                    printf("[%d] [%d] Solution found %f\n", rank, thread_id, omp_get_wtime());
+                    #pragma omp atomic write
+                    terminated = true;
                     fflush(stdout);
 
                     if (omp_get_thread_num() == MANAGER_THREAD) continue;
@@ -640,6 +651,7 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
             break;
         }
     }
+    printf("[%d] Exiting %f\n", thread_id, omp_get_wtime());
 }
 
 /* ------------------ MAIN ------------------ */
@@ -647,6 +659,8 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
 bool hitori_mpi_solution() {
     
     int max_threads = omp_get_max_threads();
+
+    printf("Start time: %f\n", omp_get_wtime());
 
     int i, j, count = 0;
     // int solution_space_manager[SOLUTION_SPACES];
@@ -736,6 +750,8 @@ bool hitori_mpi_solution() {
         MPI_Request ask_work_request = MPI_REQUEST_NULL;
         send_message(MANAGER_RANK, &ask_work_request, ASK_FOR_WORK, -1, -1, false, W2M_MESSAGE);
     }
+
+    printf("Time after building solution spaces: %f\n", omp_get_wtime());
     
     // while(!terminated)
     // {
@@ -839,14 +855,17 @@ int main(int argc, char** argv) {
 
     // MPI_Init(&argc, &argv);
     int provided;
+
     MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
     if (provided < MPI_THREAD_FUNNELED) {
         fprintf(stderr, "Insufficient thread support: required MPI_THREAD_FUNNELED, but got %d\n", provided);
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
-
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    if(rank == MANAGER_RANK) printf("Number of MPI processes: %d\n", size);
+    if(rank == MANAGER_RANK) printf("Number of OMP threads: %d\n", omp_get_max_threads());
 
     char hostname[256];
     gethostname(hostname, sizeof(hostname));
@@ -995,6 +1014,9 @@ int main(int argc, char** argv) {
     MPI_Barrier(MPI_COMM_WORLD);
     
     printf("[%d] Time for recursive part: %f\n", rank, recursive_end_time - recursive_start_time);
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == MANAGER_RANK) printf("\n\nTotal time: %f\n\n\n", rank, recursive_end_time - pruning_start_time);
     MPI_Barrier(MPI_COMM_WORLD);
     
     /*

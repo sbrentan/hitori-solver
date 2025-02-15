@@ -111,7 +111,7 @@ void mpi_share_board(Board* board, int rank) {
     MPI_Bcast(board->solution, board->rows_count * board->cols_count, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
 }
 
-void mpi_scatter_board(Board board, int rank, int size, ScatterType scatter_type, BoardType target_type, int **local_vector, int **counts_send, int **displs_send) {
+void mpi_scatter_board(Board board, int rank, int size, ScatterType scatter_type, BoardType target_type, int **local_vector, int **counts_send, int **displs_send, MPI_Comm PRUNING_COMM) {
 
     /*
         Initialize the counts_send and displs_send arrays:
@@ -173,11 +173,11 @@ void mpi_scatter_board(Board board, int rank, int size, ScatterType scatter_type
     *local_vector = (int *) malloc((*counts_send)[rank] * sizeof(int));
 
     (target_type == BOARD) ?
-        MPI_Scatterv(board.grid, *counts_send, *displs_send, MPI_INT, *local_vector, (*counts_send)[rank], MPI_INT, 0, MPI_COMM_WORLD) :
-        MPI_Scatterv(board.solution, *counts_send, *displs_send, MPI_INT, *local_vector, (*counts_send)[rank], MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Scatterv(board.grid, *counts_send, *displs_send, MPI_INT, *local_vector, (*counts_send)[rank], MPI_INT, 0, PRUNING_COMM) :
+        MPI_Scatterv(board.solution, *counts_send, *displs_send, MPI_INT, *local_vector, (*counts_send)[rank], MPI_INT, 0, PRUNING_COMM);
 }
 
-void mpi_gather_board(Board board, int rank, int *local_vector, int *counts_send, int *displs_send, int **solution) {
+void mpi_gather_board(Board board, int rank, int *local_vector, int *counts_send, int *displs_send, int **solution, MPI_Comm PRUNING_COMM) {
 
     /*
         Gather the local vectors from each process and combine them to get the final solution.
@@ -185,5 +185,5 @@ void mpi_gather_board(Board board, int rank, int *local_vector, int *counts_send
 
     *solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
 
-    MPI_Gatherv(local_vector, counts_send[rank], MPI_INT, *solution, counts_send, displs_send, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
+    MPI_Gatherv(local_vector, counts_send[rank], MPI_INT, *solution, counts_send, displs_send, MPI_INT, MANAGER_RANK, PRUNING_COMM);
 }

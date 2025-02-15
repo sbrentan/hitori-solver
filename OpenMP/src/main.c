@@ -56,7 +56,7 @@ double *individual_task_time;
 
 
 void task_build_solution_space(int solution_space_id){
-    printf("Building solution space %d\n", solution_space_id);
+    // printf("Building solution space %d\n", solution_space_id);
     BCB block = {
         .solution = malloc(board.rows_count * board.cols_count * sizeof(CellState)),
         .solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool))
@@ -269,7 +269,7 @@ void task_find_solution_for_real(BCB *block, int thread_id, int threads_in_solut
 
     int thread_num = omp_get_thread_num();
     
-    printf("[%d] Address of struct: %p\n", thread_num, (void*)block);
+    // printf("[%d] Address of struct: %p\n", thread_num, (void*)block);
     fflush(stdout);
 
     if (false) {
@@ -475,7 +475,7 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
     initializeQueue(&local_queue, blocks_per_thread);
 
     // TODO: create local board
-    printf("[%d] Creating local queue\n", thread_id);
+    // printf("[%d] Creating local queue\n", thread_id);
     
     int i;
     #pragma omp critical
@@ -487,7 +487,7 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
     }
 
     int queue_size = getQueueSize(&local_queue);
-    printf("[%d] Local queue size: %d\n", thread_id, queue_size);
+    // printf("[%d] Local queue size: %d\n", thread_id, queue_size);
     fflush(stdout);
     if (queue_size > 1 && solutions_to_skip > 0) {
         printf("[%d] ERROR: More than one block in local queue\n", thread_id);
@@ -571,8 +571,8 @@ bool task_openmp_solution_for_real() {
                     threads_per_block++;
                 threads_per_block = threads_per_block < 1 ? 1 : threads_per_block;
 
-                printf("Blocks per thread %d\n", blocks_per_thread);
-                printf("Threads per block %d\n", threads_per_block);
+                // printf("Blocks per thread %d\n", blocks_per_thread);
+                // printf("Threads per block %d\n", threads_per_block);
                 fflush(stdout);
 
                 // int iter = max_threads < SOLUTION_SPACES ? 1 : blocks_per_thread;
@@ -593,7 +593,7 @@ bool task_openmp_solution_for_real() {
                 }
                 
                 int solutions_to_skip = count / SOLUTION_SPACES;
-                printf("Starting task with %d %d %d\n", i, threads_per_block, solutions_to_skip);
+                // printf("Starting task with %d %d %d\n", i, threads_per_block, solutions_to_skip);
                 fflush(stdout);
                 #pragma omp task firstprivate(i, threads_per_block, solutions_to_skip)
                 {
@@ -619,6 +619,7 @@ int main(int argc, char** argv) {
         Read the board from the input file
     */
 
+    printf("Board name: %s\n", argv[1]);
     read_board(&board, argv[1]);
     
     /*
@@ -700,7 +701,7 @@ int main(int argc, char** argv) {
     printf("Time techniques needed %f\n", techniques_end_time-pruning_start_time);
     printf("Time setting needed %f\n", pruning_end_time-techniques_end_time);
     printf("Total Time pruning needed %f\n", pruning_end_time-pruning_start_time);
-    print_board("Pruned", pruned, SOLUTION);
+    // print_board("Pruned", pruned, SOLUTION);
     fflush(stdout);
 
     /*
@@ -718,7 +719,7 @@ int main(int argc, char** argv) {
 
     // print all addresses of the queues
     for (i = 0; i < max_threads; i++) {
-        printf("Queue address %d: %p\n", i, (void*)&leaf_queues[i]);
+        // printf("Queue address %d: %p\n", i, (void*)&leaf_queues[i]);
     }
 
     /*
@@ -736,24 +737,26 @@ int main(int argc, char** argv) {
     bool solution_found = task_openmp_solution_for_real();
     double recursive_end_time = omp_get_wtime();
 
-    print_board("Pruned solution", pruned, SOLUTION);
+    // print_board("Pruned solution", pruned, SOLUTION);
         
     printf("Time for pruning part: %f\n", pruning_end_time - pruning_start_time);
     
     printf("Time for recursive part: %f\n", recursive_end_time - recursive_start_time);
 
-    printf("Time for building: %f\n", building_time);
-    printf("Time for tasks: %f\n", task_time);
-    printf("Time for master: %f\n", master_time);
-    printf("Time for master wait: %f\n", master_wait_time);
-    printf("Time for thread wait: %f\n", thread_wait_time);
-    printf("Time for master running task: %f\n", master_running_task);
-    printf("Time for next leaf: %f\n", next_leaf_time);
-    printf("Time for next leaf allocation: %f\n", next_leaf_allocation_time);
-    // print individual task times
-    for (i = 0; i < omp_get_max_threads(); i++) {
-        printf("Time for task %d: %f\n", i, individual_task_time[i]);
-    }
+    printf("\n\nTotal time: %f\n\n\n", recursive_end_time - pruning_start_time);
+    
+    // printf("Time for building: %f\n", building_time);
+    // printf("Time for tasks: %f\n", task_time);
+    // printf("Time for master: %f\n", master_time);
+    // printf("Time for master wait: %f\n", master_wait_time);
+    // printf("Time for thread wait: %f\n", thread_wait_time);
+    // printf("Time for master running task: %f\n", master_running_task);
+    // printf("Time for next leaf: %f\n", next_leaf_time);
+    // printf("Time for next leaf allocation: %f\n", next_leaf_allocation_time);
+    // // print individual task times
+    // for (i = 0; i < omp_get_max_threads(); i++) {
+    //     printf("Time for task %d: %f\n", i, individual_task_time[i]);
+    // }
     
     if (solution_found) {
         write_solution(board);

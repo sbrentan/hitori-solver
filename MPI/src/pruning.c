@@ -6,7 +6,7 @@
 #include "../include/board.h"
 #include "../include/utils.h"
 
-Board mpi_uniqueness_rule(Board board, int rank, int size) {
+Board mpi_uniqueness_rule(Board board, int rank, int size, MPI_Comm PRUNING_COMM) {
 
     /*
         RULE DESCRIPTION:
@@ -17,10 +17,10 @@ Board mpi_uniqueness_rule(Board board, int rank, int size) {
     */
 
     int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row);
+    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row, PRUNING_COMM);
 
     int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col);
+    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col, PRUNING_COMM);
     
     int i, j, k;
     int local_row_solution[counts_send_row[rank]];
@@ -74,20 +74,20 @@ Board mpi_uniqueness_rule(Board board, int rank, int size) {
     }
 
     int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
+    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution, PRUNING_COMM);
+    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution, PRUNING_COMM);
 
     Board row_board = (Board) { board.grid, board.rows_count, board.cols_count, row_solution };
     Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
 
-    Board solution = combine_boards(row_board, col_board, true, rank, "Uniqueness Rule");
+    Board solution = combine_boards(row_board, col_board, true, rank, "Uniqueness Rule", PRUNING_COMM);
 
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
     return solution;
 }
 
-Board mpi_sandwich_rules(Board board, int rank, int size) {
+Board mpi_sandwich_rules(Board board, int rank, int size, MPI_Comm PRUNING_COMM) {
 
     /*
         RULE DESCRIPTION:
@@ -102,10 +102,10 @@ Board mpi_sandwich_rules(Board board, int rank, int size) {
     */
 
     int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row);
+    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row, PRUNING_COMM);
 
     int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col);
+    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col, PRUNING_COMM);
 
     int i, j;
     int local_row_solution[counts_send_row[rank]];
@@ -168,20 +168,20 @@ Board mpi_sandwich_rules(Board board, int rank, int size) {
     }
 
     int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
+    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution, PRUNING_COMM);
+    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution, PRUNING_COMM);
 
     Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
     Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
 
-    Board solution = combine_boards(row_board, col_board, false, rank, "Sandwich Rules");
+    Board solution = combine_boards(row_board, col_board, false, rank, "Sandwich Rules", PRUNING_COMM);
     
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
     return solution;
 }
 
-Board mpi_pair_isolation(Board board, int rank, int size) {
+Board mpi_pair_isolation(Board board, int rank, int size, MPI_Comm PRUNING_COMM) {
 
     /*
         RULE DESCRIPTION:
@@ -192,10 +192,10 @@ Board mpi_pair_isolation(Board board, int rank, int size) {
     */
     
     int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row);
+    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row, PRUNING_COMM);
 
     int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col);
+    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col, PRUNING_COMM);
 
     int i, j, k;
     int local_row_solution[counts_send_row[rank]];
@@ -271,20 +271,20 @@ Board mpi_pair_isolation(Board board, int rank, int size) {
     }
 
     int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
+    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution, PRUNING_COMM);
+    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution, PRUNING_COMM);
 
     Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
     Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
 
-    Board solution = combine_boards(row_board, col_board, false, rank, "Pair Isolation");
+    Board solution = combine_boards(row_board, col_board, false, rank, "Pair Isolation", PRUNING_COMM);
     
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
     return solution;
 }
 
-Board mpi_flanked_isolation(Board board, int rank, int size) {
+Board mpi_flanked_isolation(Board board, int rank, int size, MPI_Comm PRUNING_COMM) {
 
     /*
         RULE DESCRIPTION:
@@ -295,10 +295,10 @@ Board mpi_flanked_isolation(Board board, int rank, int size) {
     */
 
     int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row);
+    mpi_scatter_board(board, rank, size, ROWS, BOARD, &local_row, &counts_send_row, &displs_send_row, PRUNING_COMM);
 
     int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col);
+    mpi_scatter_board(board, rank, size, COLS, BOARD, &local_col, &counts_send_col, &displs_send_col, PRUNING_COMM);
 
     int i, j, k;
     int local_row_solution[counts_send_row[rank]];
@@ -358,13 +358,13 @@ Board mpi_flanked_isolation(Board board, int rank, int size) {
     }
 
     int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
+    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution, PRUNING_COMM);
+    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution, PRUNING_COMM);
 
     Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
     Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
 
-    Board solution = combine_boards(row_board, col_board, false, rank, "Flanked Isolation");
+    Board solution = combine_boards(row_board, col_board, false, rank, "Flanked Isolation", PRUNING_COMM);
 
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
@@ -493,7 +493,7 @@ void compute_corner(Board board, int x, int y, CornerType corner_type, int **loc
     }
 }
 
-Board mpi_corner_cases(Board board, int rank, int size) {
+Board mpi_corner_cases(Board board, int rank, int size, MPI_Comm PRUNING_COMM) {
     
     /*
         RULE DESCRIPTION:
@@ -521,10 +521,10 @@ Board mpi_corner_cases(Board board, int rank, int size) {
     */
 
     MPI_Comm TWO_PROCESSESS_COMM;
-    MPI_Comm_split(MPI_COMM_WORLD, rank < 2, rank, &TWO_PROCESSESS_COMM);
+    MPI_Comm_split(PRUNING_COMM, rank < 2, rank, &TWO_PROCESSESS_COMM);
 
     MPI_Comm FOUR_PROCESSESS_COMM;
-    MPI_Comm_split(MPI_COMM_WORLD, rank < 4, rank, &FOUR_PROCESSESS_COMM);
+    MPI_Comm_split(PRUNING_COMM, rank < 4, rank, &FOUR_PROCESSESS_COMM);
     
     int *solutions, *local_corner_solution;
 
@@ -611,10 +611,10 @@ Board mpi_corner_cases(Board board, int rank, int size) {
     Board bottom_left_board = { board.grid, board.rows_count, board.cols_count, solutions + 2 * rows * cols };
     Board bottom_right_board = { board.grid, board.rows_count, board.cols_count, solutions + 3 * rows * cols };
 
-    Board top_corners_board = combine_boards(top_left_board, top_right_board, false, rank, "Top Corner Cases");
-    Board bottom_corners_board = combine_boards(bottom_left_board, bottom_right_board, false, rank, "Bottom Corner Cases");
+    Board top_corners_board = combine_boards(top_left_board, top_right_board, false, rank, "Top Corner Cases", PRUNING_COMM);
+    Board bottom_corners_board = combine_boards(bottom_left_board, bottom_right_board, false, rank, "Bottom Corner Cases", PRUNING_COMM);
 
-    Board solution = combine_boards(top_corners_board, bottom_corners_board, false, rank, "Corner Cases");
+    Board solution = combine_boards(top_corners_board, bottom_corners_board, false, rank, "Corner Cases", PRUNING_COMM);
 
     /*
         Destroy the temporary communicators, compute the final solution and broadcast it to all processes
@@ -626,7 +626,7 @@ Board mpi_corner_cases(Board board, int rank, int size) {
     return solution;
 }
 
-Board mpi_set_white(Board board, int rank, int size) {
+Board mpi_set_white(Board board, int rank, int size, MPI_Comm PRUNING_COMM) {
     
     /*
         RULE DESCRIPTION:
@@ -637,10 +637,10 @@ Board mpi_set_white(Board board, int rank, int size) {
     */
 
     int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, SOLUTION, &local_row, &counts_send_row, &displs_send_row);
+    mpi_scatter_board(board, rank, size, ROWS, SOLUTION, &local_row, &counts_send_row, &displs_send_row, PRUNING_COMM);
 
     int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, SOLUTION, &local_col, &counts_send_col, &displs_send_col);
+    mpi_scatter_board(board, rank, size, COLS, SOLUTION, &local_col, &counts_send_col, &displs_send_col, PRUNING_COMM);
 
     int i, j, k;
     int local_row_solution[counts_send_row[rank]];
@@ -697,20 +697,20 @@ Board mpi_set_white(Board board, int rank, int size) {
     }
 
     int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
+    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution, PRUNING_COMM);
+    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution, PRUNING_COMM);
 
     Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution }; 
     Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
 
-    Board solution = combine_boards(row_board, col_board, false, rank, "Set White");
+    Board solution = combine_boards(row_board, col_board, false, rank, "Set White", PRUNING_COMM);
     
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 
     return solution;
 }
 
-Board mpi_set_black(Board board, int rank, int size) {
+Board mpi_set_black(Board board, int rank, int size, MPI_Comm PRUNING_COMM) {
     
     /*
         RULE DESCRIPTION:
@@ -721,10 +721,10 @@ Board mpi_set_black(Board board, int rank, int size) {
     */
 
     int *local_row, *counts_send_row, *displs_send_row;
-    mpi_scatter_board(board, rank, size, ROWS, SOLUTION, &local_row, &counts_send_row, &displs_send_row);
+    mpi_scatter_board(board, rank, size, ROWS, SOLUTION, &local_row, &counts_send_row, &displs_send_row, PRUNING_COMM);
 
     int *local_col, *counts_send_col, *displs_send_col;
-    mpi_scatter_board(board, rank, size, COLS, SOLUTION, &local_col, &counts_send_col, &displs_send_col);
+    mpi_scatter_board(board, rank, size, COLS, SOLUTION, &local_col, &counts_send_col, &displs_send_col, PRUNING_COMM);
 
     int i, j;
     int local_row_solution[counts_send_row[rank]];
@@ -754,13 +754,13 @@ Board mpi_set_black(Board board, int rank, int size) {
     }
 
     int *row_solution, *col_solution;
-    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution);
-    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution);
+    mpi_gather_board(board, rank, local_row_solution, counts_send_row, displs_send_row, &row_solution, PRUNING_COMM);
+    mpi_gather_board(board, rank, local_col_solution, counts_send_col, displs_send_col, &col_solution, PRUNING_COMM);
 
     Board row_board = { board.grid, board.rows_count, board.cols_count, row_solution };
     Board col_board = transpose((Board) { board.grid, board.rows_count, board.cols_count, col_solution });
 
-    Board solution = combine_boards(row_board, col_board, false, rank, "Set Black");
+    Board solution = combine_boards(row_board, col_board, false, rank, "Set Black", PRUNING_COMM);
 
     free_memory((int *[]){local_row, counts_send_row, displs_send_row, local_col, counts_send_col, displs_send_col, row_solution, col_solution});
 

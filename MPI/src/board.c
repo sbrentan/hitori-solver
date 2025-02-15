@@ -132,7 +132,7 @@ Board transpose(Board board) {
     return Tboard;
 }
 
-Board combine_boards(Board first_board, Board second_board, bool forced, int rank, char *technique) {
+Board combine_boards(Board first_board, Board second_board, bool forced, int rank, char *technique, MPI_Comm PRUNING_COMM) {
     
     int rows = -1, cols = -1;
 
@@ -145,8 +145,8 @@ Board combine_boards(Board first_board, Board second_board, bool forced, int ran
         Broadcast the dimensions of the boards.
     */
 
-    MPI_Bcast(&rows, 1, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
-    MPI_Bcast(&cols, 1, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
+    MPI_Bcast(&rows, 1, MPI_INT, MANAGER_RANK, PRUNING_COMM);
+    MPI_Bcast(&cols, 1, MPI_INT, MANAGER_RANK, PRUNING_COMM);
 
     /*
         Initialize the solution board with the values of the original board.
@@ -156,7 +156,7 @@ Board combine_boards(Board first_board, Board second_board, bool forced, int ran
 
     if (rank == MANAGER_RANK) merged.grid = first_board.grid;
 
-    MPI_Bcast(merged.grid, rows * cols, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
+    MPI_Bcast(merged.grid, rows * cols, MPI_INT, MANAGER_RANK, PRUNING_COMM);
 
     /*
         Combine the solutions by performing a pairwise comparison:
@@ -178,13 +178,25 @@ Board combine_boards(Board first_board, Board second_board, bool forced, int ran
                 else if (!forced) merged.solution[i * cols + j] = BLACK;
             }   
         }
+
+        // int i, j;
+        // for (i = 0; i < rows; i++) {
+        //     for (j = 0; j < cols; j++) {
+        //         if (first_board.solution[i * cols + j] == second_board.solution[i * cols + j]) 
+        //             merged.solution[i * cols + j] = first_board.solution[i * cols + j];
+        //         else if (!forced && first_board.solution[i * cols + j] == UNKNOWN && second_board.solution[i * cols + j] != UNKNOWN) 
+        //             merged.solution[i * cols + j] = second_board.solution[i * cols + j];
+        //         else if (!forced && first_board.solution[i * cols + j] != UNKNOWN && second_board.solution[i * cols + j] == UNKNOWN) 
+        //             merged.solution[i * cols + j] = first_board.solution[i * cols + j];
+        //     }   
+        // }
     }
 
     /*
         Broadcast the merged solution.
     */
     
-    MPI_Bcast(merged.solution, rows * cols, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
-    
+    MPI_Bcast(merged.solution, rows * cols, MPI_INT, MANAGER_RANK, PRUNING_COMM);
+
     return merged;
 }

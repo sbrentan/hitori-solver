@@ -129,6 +129,7 @@ void init_solution_space(Board board, BCB* block, int solution_space_id, int **u
                 cell_choice = abs(cell_choice - 1);
                 if (!is_cell_state_valid(board, block, i, uk_idx, cell_choice)) {
                     cell_choice = UNKNOWN;
+                    printf("[Error] Solution space invalid at cell id %d\n", i * board.cols_count + uk_idx);
                     continue;
                 }
             }
