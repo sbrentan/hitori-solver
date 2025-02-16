@@ -122,8 +122,6 @@ Board mpi_sandwich_rules(Board board, int rank, int size, MPI_Comm PRUNING_COMM)
                 int value2 = local_row[i * board.cols_count + j + 1];
                 int value3 = local_row[i * board.cols_count + j + 2];
 
-                // 222 --> XOX
-                // 212 --> ?O?
                 if (value1 == value2 && value2 == value3) {
                     local_row_solution[i * board.cols_count + j] = BLACK;
                     local_row_solution[i * board.cols_count + j + 1] = WHITE;
@@ -149,7 +147,6 @@ Board mpi_sandwich_rules(Board board, int rank, int size, MPI_Comm PRUNING_COMM)
                 int value2 = local_col[i * board.rows_count + j + 1];
                 int value3 = local_col[i * board.rows_count + j + 2];
 
-                // 222 --> XOX
                 if (value1 == value2 && value2 == value3) {
                     local_col_solution[i * board.rows_count + j] = BLACK;
                     local_col_solution[i * board.rows_count + j + 1] = WHITE;
@@ -511,7 +508,7 @@ Board mpi_corner_cases(Board board, int rank, int size, MPI_Comm PRUNING_COMM) {
         Compute the corner cases:
             1) If 1 process, compute all the corner cases
             2) If 2 or 3 processes, process 0 computes top corners and process 1 computes bottom corners (if 3, process 2 will be idle)
-            3) If 4 processes or more, each process will compute a corner while the rest will be idle
+            3) If 4 processes or more, only four will compute a corner while the rest will be idle
     */
 
     /*
@@ -521,10 +518,12 @@ Board mpi_corner_cases(Board board, int rank, int size, MPI_Comm PRUNING_COMM) {
     */
 
     MPI_Comm TWO_PROCESSESS_COMM;
-    MPI_Comm_split(PRUNING_COMM, rank < 2, rank, &TWO_PROCESSESS_COMM);
+    int color = rank < 2 ? 1 : MPI_UNDEFINED;
+    MPI_Comm_split(PRUNING_COMM, color, rank, &TWO_PROCESSESS_COMM);
 
     MPI_Comm FOUR_PROCESSESS_COMM;
-    MPI_Comm_split(PRUNING_COMM, rank < 4, rank, &FOUR_PROCESSESS_COMM);
+    color = rank < 4 ? 1 : MPI_UNDEFINED;
+    MPI_Comm_split(PRUNING_COMM, color, rank, &FOUR_PROCESSESS_COMM);
     
     int *solutions, *local_corner_solution;
 
@@ -620,8 +619,8 @@ Board mpi_corner_cases(Board board, int rank, int size, MPI_Comm PRUNING_COMM) {
         Destroy the temporary communicators, compute the final solution and broadcast it to all processes
     */
 
-    MPI_Comm_free(&TWO_PROCESSESS_COMM);
-    MPI_Comm_free(&FOUR_PROCESSESS_COMM);
+    if (TWO_PROCESSESS_COMM != MPI_COMM_NULL) MPI_Comm_free(&TWO_PROCESSESS_COMM);
+    if (FOUR_PROCESSESS_COMM != MPI_COMM_NULL) MPI_Comm_free(&FOUR_PROCESSESS_COMM);
 
     return solution;
 }

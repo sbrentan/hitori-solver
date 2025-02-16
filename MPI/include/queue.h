@@ -3,13 +3,12 @@
 
 #include "common.h"
 
-void initializeQueue(Queue* q);
+void initializeQueue(Queue* q, int size);
 int isFull(Queue* q);
 int getQueueSize(Queue* q);
 bool isEmpty(Queue* q);
 void enqueue(Queue *q, BCB *block);
 BCB peek(Queue* q);
 BCB dequeue(Queue* q);
-void printQueue(Queue* q);
 
 #endif

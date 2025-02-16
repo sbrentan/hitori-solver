@@ -4,15 +4,16 @@
 #include "../include/queue.h"
 
 // Function to initialize the queue
-void initializeQueue(Queue* q) {
+void initializeQueue(Queue* q, int size) {
+    q->items = (BCB*) malloc(size * sizeof(BCB));
     q->front = -1;
     q->rear = -1;
-    // TODO: free all the items in the queue
+    q->size = size;
 }
 
 int isFull(Queue* q) {
     // If the next position is the front, the queue is full
-    return (q->rear + 1) % SOLUTION_SPACES == q->front;
+    return (q->rear + 1) % q->size == q->front;
 }
 
 int getQueueSize(Queue* q) {
@@ -21,7 +22,7 @@ int getQueueSize(Queue* q) {
     // If the front is behind the rear, return the difference
     if (q->front <= q->rear) return q->rear - q->front + 1;
     // If the front is ahead of the rear, return the difference plus the size of the queue
-    return SOLUTION_SPACES - q->front + q->rear + 1;
+    return q->size - q->front + q->rear + 1;
 } 
 
 // Function to check if the queue is empty
@@ -30,26 +31,22 @@ bool isEmpty(Queue* q) {
 }
 
 void enqueue(Queue *q, BCB *block) {
-    // If the queue is full, print an error message and
-    // return
+    // If the queue is full, print an error message and return
     if (isFull(q)) {
         printf("Queue overflow\n");
-        return;
+        exit(-1);
     }
-    // If the queue is empty, set the front to the first
-    // position
+    // If the queue is empty, set the front to the first position
     if (q->front == -1) {
         q->front = 0;
     }
     // Add the data to the queue and move the rear pointer
-    q->rear = (q->rear + 1) % SOLUTION_SPACES;
+    q->rear = (q->rear + 1) % q->size;
     q->items[q->rear] = *block;
-    //printf("Element %lld inserted\n", value);
 }
 
 BCB peek(Queue* q) {
-    // If the queue is empty, print an error message and
-    // return -1
+    // If the queue is empty, print an error message and return -1
     if (isEmpty(q)) {
         printf("Queue underflow\n");
         exit(-1);
@@ -59,43 +56,21 @@ BCB peek(Queue* q) {
 }
 
 BCB dequeue(Queue* q) {
-    // If the queue is empty, print an error message and
-    // return -1
+    // If the queue is empty, print an error message and return -1
     if (isEmpty(q)) {
         printf("Queue underflow\n");
         exit(-1);
     }
     // Get the data from the front of the queue
     BCB data = q->items[q->front];
-    // If the front and rear pointers are at the same
-    // position, reset them
+    // If the front and rear pointers are at the same position, reset them
     if (q->front == q->rear) {
         q->front = q->rear = -1;
     }
     else {
-        // Otherwise, move the front pointer to the next
-        // position
-        q->front = (q->front + 1) % SOLUTION_SPACES;
+        // Otherwise, move the front pointer to the next position
+        q->front = (q->front + 1) % q->size;
     }
     // Return the dequeued data
     return data;
-}
-
-void printQueue(Queue* q) {
-    printf("Skipping printing queue");
-    return;
-    // // If the queue is empty, print a message and return
-    // if (isEmpty(q)) {
-    //     printf("Queue is empty\n");
-    //     return;
-    // }
-    // // Print the elements in the queue
-    // printf("Queue elements: ");
-    // int i = q->front;
-    // while (i != q->rear) {
-    //     printf("%d ", q->items[i]);
-    //     i = (i + 1) % SOLUTION_SPACES;
-    // }
-    // // Print the last element
-    // printf("%d\n", q->items[q->rear]);
 }

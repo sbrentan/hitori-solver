@@ -3,34 +3,40 @@
 
 #include <stdbool.h>
 
-#define DEBUG false
-#define INPUT_PATH "../test-cases/inputs/"
-#define MAX_BUFFER_SIZE 2048
-#define SOLUTION_SPACES 8
-#define MANAGER_RANK 0
-#define PRUNING_WORKERS 4
+#define DEBUG 0                                 // Debug flag
+#define INPUT_PATH "../test-cases/inputs/"      // Path to the input files
+#define MAX_BUFFER_SIZE 2048                    // Maximum buffer size for reading the input file
+#define SOLUTION_SPACES 8                       // Number of solution spaces
+#define MANAGER_RANK 0                          // Rank of the manager process
+#define PRUNING_WORKERS 4                       // Number of workers that will be used for pruning
+#define MAX_MSG_SIZE 10
 
-#define W2M_MESSAGE 0
-#define M2W_MESSAGE 1
-#define W2W_MESSAGE 2
-#define W2W_BUFFER 3
+// MPI_Messages tags definition
+#define W2M_MESSAGE 0                           // Message from worker to manager
+#define M2W_MESSAGE 1                           // Message from manager to worker
+#define W2W_MESSAGE 2                           // Message from worker to worker
+#define W2W_BUFFER 3                            // Buffer from worker to worker
 
+// Definition of the cell states for the hitori board
 typedef enum CellState {
     UNKNOWN = -1,
     WHITE = 0,
     BLACK = 1
 } CellState;
 
+// Definition of the board types, BOARD is the original board, SOLUTION is the board with the solution
 typedef enum BoardType {
     BOARD = 0,
     SOLUTION = 1
 } BoardType;
 
+// Definition of the scatter type, ROWS is used to scatter the rows of the board, COLS is used to scatter the columns of the board
 typedef enum ScatterType {
     ROWS = 0,
     COLS = 1
 } ScatterType;
 
+// Definition of the corner types for the pruning of the corner cases
 typedef enum CornerType {
     TOP_LEFT = 0,
     TOP_RIGHT = 1,
@@ -38,6 +44,7 @@ typedef enum CornerType {
     BOTTOM_RIGHT = 3
 } CornerType;  
 
+// Definition of the board structure
 typedef struct Board {
     int *grid;
     int rows_count;
@@ -47,14 +54,16 @@ typedef struct Board {
 
 // Board Control Block
 typedef struct BCB {
-    CellState *solution;
+    CellState *solution;            // This matrix contains the solution for the block
     bool *solution_space_unknowns;  // This matrix defines for each unknown if it has been marked as a cell state in the solution space definition
 } BCB;
 
+// Definition of the circular queue structure 
 typedef struct Queue {
-    BCB items[SOLUTION_SPACES];
+    BCB *items;
     int front;
     int rear;
+    int size;
 } Queue;
 
 typedef enum MessageType {
@@ -82,17 +91,19 @@ typedef enum MessageType {
                                     // - data2: total processes in solution space
 } MessageType;
 
+// Definition of the message structure
 typedef struct Message {
-    MessageType type;
-    int data1;
-    int data2;
-    bool invalid;
+    MessageType type;               // Type of the message
+    int data1;                      // First parameter of the message [optional]
+    int data2;                      // Second parameter of the message [optional]
+    bool invalid;                   // Flag to indicate if the message is invalid
 } Message;
 
+// Definition of the worker status structure
 typedef struct WorkerStatus {
-    int queue_size;
-    int processes_sharing_solution_space;
-    int master_process;
+    int queue_size;                                 // Identifies the number of elments (blocks) in the queue to be processed 
+    int processes_sharing_solution_space;           // Identifies the number of processes that are sharing the same solution space
+    int master_process;                             // Identifies the master process of the solution space
 } WorkerStatus;
 
 #endif
