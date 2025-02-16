@@ -10,15 +10,20 @@ void read_board(Board* board, char *filename) {
         Helper function to read the board from the input file.
     */
 
-    // Concat INPUT_PATH with the filename
+    /*
+        Parameters:
+            - board: the board to be read
+            - filename: the name of the input file
+    */
+
     char path[MAX_BUFFER_SIZE];
     snprintf(path, sizeof(path), "%s%s", INPUT_PATH, filename);
     
     FILE *fp = fopen(path, "r");
     
     if (fp == NULL) {
-        printf("Could not open file.\n");
-        exit(1);
+        fprintf(stderr, "Could not open file.\n");
+        exit(-1);
     }
 
     char line[MAX_BUFFER_SIZE];
@@ -45,12 +50,7 @@ void read_board(Board* board, char *filename) {
 
     if (rows != cols) {
         printf("The board must be a square.\n");
-        exit(1);
-    }
-
-    if (rows < 4) {
-        printf("The board must be at least 4x4.\n");
-        exit(1);
+        exit(-1);
     }
 
     board->grid = (int *) malloc(rows * cols * sizeof(int));
@@ -80,6 +80,13 @@ void print_board(char *title, Board board, BoardType type) {
     /*
         Helper function to print the board.
     */
+
+    /*
+        Parameters:
+            - title: the title of the board
+            - board: the board to be printed
+            - type: the type of the board (BOARD or SOLUTION)
+    */
     
     char buffer[MAX_BUFFER_SIZE * 2];
     snprintf(buffer, sizeof(buffer), "\n# --- %s --- #\n", title);
@@ -108,6 +115,12 @@ bool is_board_solution_equal(Board first_board, Board second_board) {
         Helper function to check if two boards are equal.
     */
 
+    /*
+        Parameters:
+            - first_board: the first board to be compared
+            - second_board: the second board to be compared
+    */
+
     if (first_board.rows_count != second_board.rows_count || first_board.cols_count != second_board.cols_count) return false;
 
     int i, j;
@@ -120,7 +133,12 @@ bool is_board_solution_equal(Board first_board, Board second_board) {
 
 Board transpose(Board board) {
     /*
-        Helper function to transpose a matrix.
+        Helper function to transpose a board.
+    */
+
+    /*
+        Parameters:
+            - board: the board to be transposed
     */
 
     Board Tboard = { (int *) malloc(board.rows_count * board.cols_count * sizeof(int)), board.cols_count, board.rows_count, (int *) malloc(board.rows_count * board.cols_count * sizeof(int)) };
