@@ -11,6 +11,10 @@ The root folder contains:
 
 Additionally, you can found some referenced documents, the test cases used to validate the algorithm effectiveness and the report that details more about the implementation aspects.
 
+## Experimental Results
+
+Different test cases have been carried out during the experimental evaluation. All the execution times resulting from these tests can be found at this [document](https://docs.google.com/spreadsheets/d/1l0978Gox-QoupAKBNDD-ppr9Df4p9MP42PE5KoYDLCU/edit?gid=1344981639#gid=1344981639).
+
 # UNITN Server Connection
 
 Follow these instructions to correctly set up the environment.
