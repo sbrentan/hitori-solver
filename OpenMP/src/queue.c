@@ -11,15 +11,15 @@ void initializeQueue(Queue* q, int size) {
     q->size = size;
 }
 
-void initializeQueueArray(Queue **leaf_queues, int max_threads, int solution_spaces) {
-    *leaf_queues = malloc(max_threads * sizeof(Queue));
+void initializeQueueArray(Queue **leaf_queues, int array_size, int queue_size) {
+    *leaf_queues = malloc(array_size * sizeof(Queue));
     if (*leaf_queues == NULL) {
         fprintf(stderr, "Memory allocation failed for leaf queues.\n");
         exit(-1);
     }
     int i;
-    for (i = 0; i < max_threads; i++) {
-        initializeQueue(&(*leaf_queues)[i], solution_spaces);
+    for (i = 0; i < array_size; i++) {
+        initializeQueue(&(*leaf_queues)[i], queue_size);
     }
 }
 

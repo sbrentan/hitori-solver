@@ -95,10 +95,8 @@ void task_find_solution(int thread_id, int threads_in_solution_space, int soluti
     }
     
     if (queue_size > 1 && solutions_to_skip > 0) {
-        if (DEBUG) {
-            printf("[%d] ERROR: More than one block in local queue\n", thread_id);
-            fflush(stdout);
-        }
+        printf("[%d] ERROR: More than one block in local queue\n", thread_id);
+        fflush(stdout);
         exit(-1);
     }
 

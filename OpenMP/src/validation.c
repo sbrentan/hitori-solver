@@ -1,7 +1,6 @@
 #include <stdlib.h> 
 #include <string.h>
 #include <stdio.h>
-#include <omp.h>
 
 #include "../include/validation.h"
 

@@ -172,8 +172,8 @@ Board combine_boards(Board first_board, Board second_board, bool forced, char *t
     /*
         Combine the solutions by performing a pairwise comparison:
         1) If the values are the same, keep the value
-        2) If the values are unknown and white, mark the cell as white
-        3) If the values are different, mark the cell as black
+        2) If only one value is unknown, keep the known value
+        3) If the values are different, leave the cell as unknown
     */
 
     memset(merged.solution, UNKNOWN, rows * cols * sizeof(int));
@@ -188,8 +188,6 @@ Board combine_boards(Board first_board, Board second_board, bool forced, char *t
                 merged.solution[i * cols + j] = second_board.solution[i * cols + j];
             else if (first_board.solution[i * cols + j] != UNKNOWN && second_board.solution[i * cols + j] == UNKNOWN) 
                 merged.solution[i * cols + j] = first_board.solution[i * cols + j];
-            else
-                merged.solution[i * cols + j] = UNKNOWN;
         }   
     }
 
