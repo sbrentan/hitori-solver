@@ -104,6 +104,8 @@ void receive_message(Message *message, int source, MPI_Request *request, int tag
     }
 }
 
+int message_index = 0, message_queue_size = 10;
+Message messagesqueue[10];
 void send_message(int destination, MPI_Request *request, MessageType type, int data1, int data2, bool invalid, int tag) {
     if (size == 1) return;
     if (omp_get_thread_num() != MANAGER_THREAD) {
@@ -122,8 +124,10 @@ void send_message(int destination, MPI_Request *request, MessageType type, int d
         wait_for_message(request);
         printf("[INFO] Process %d finished waiting for the previous request to complete\n", rank);
     }
-    Message message = {type, data1, data2, invalid};
-    MPI_Isend(&message, 1, MPI_MESSAGE, destination, tag, MPI_COMM_WORLD, request);
+    
+    messagesqueue[message_index] = (Message){type, data1, data2, invalid};
+    MPI_Isend(&messagesqueue[message_index], 1, MPI_MESSAGE, destination, tag, MPI_COMM_WORLD, request);
+    message_index = (message_index + 1) % message_queue_size;
     printf("[INFO] Process %d sent a message with tag %d to process %d with type %d, data1 %d, data2 %d and invalid %d\n", rank, tag, destination, type, data1, data2, invalid);
 }
 
@@ -317,8 +321,8 @@ void worker_check_messages() {
         send_terminate_message = false;
         MPI_Request terminate_request = MPI_REQUEST_NULL;
         send_message(MANAGER_RANK, &terminate_request, TERMINATE, -1, -1, false, W2M_MESSAGE);
-        // #pragma omp atomic write
-        // terminated = true;
+        #pragma omp atomic write
+        terminated = true;
     }
     // else if(send_status_update_message) {
     //     send_status_update_message = false;
@@ -415,8 +419,16 @@ void manager_consume_message(Message *message, int source) {
     if (size == 1) return;
     printf("[INFO] Process %d (manager) received a message from process %d {%d}\n", rank, source, message->type);
     int i; //sender_id;
-    
-    if (message->type == STATUS_UPDATE) {
+    if(message->type == TERMINATE){
+        
+        for (i = 0; i < size; i++) {
+            if (i == MANAGER_RANK) continue;
+            send_message(i, &send_worker_request, TERMINATE, source, -1, false, M2W_MESSAGE);
+        }
+        wait_for_message(&send_worker_request);
+        terminated = true;
+    }
+    else if (message->type == STATUS_UPDATE) {
         worker_statuses[source].queue_size = message->data1;
         worker_statuses[source].processes_sharing_solution_space = message->data2;
     }
@@ -481,12 +493,6 @@ void manager_consume_message(Message *message, int source) {
     }
     else {
         printf("[ERROR] Process %d (manager) received an invalid message type %d from process %d\n", rank, message->type, source);
-        // for (i = 0; i < size; i++) {
-        //     if (i == MANAGER_RANK) continue;
-        //     send_message(i, &send_worker_request, TERMINATE, source, -1, false, M2W_MESSAGE);
-        // }
-        // wait_for_message(&send_worker_request);
-        // terminated = true;
     }
 }
 
@@ -616,8 +622,8 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
                     memcpy(board.solution, current.solution, board.rows_count * board.cols_count * sizeof(CellState));
 
                     printf("[%d] [%d] Solution found %f\n", rank, thread_id, omp_get_wtime());
-                    #pragma omp atomic write
-                    terminated = true;
+                    // #pragma omp atomic write
+                    // terminated = true;
                     fflush(stdout);
 
                     if (omp_get_thread_num() == MANAGER_THREAD) continue;
@@ -646,7 +652,7 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
                 fflush(stdout);
             }
         } else {
-            printf("[%d] Local queue is empty\n", thread_id);
+            // printf("[%d] Local queue is empty\n", thread_id);
             fflush(stdout);
             if(omp_get_thread_num() != MANAGER_THREAD) {
                 break;
