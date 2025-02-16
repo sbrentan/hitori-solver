@@ -480,13 +480,13 @@ void manager_consume_message(Message *message, int source) {
         }
     }
     else {
-        // printf("[ERROR] Process %d (manager) received an invalid message type %d from process %d\n", rank, message->type, source);
-        for (i = 0; i < size; i++) {
-            if (i == MANAGER_RANK) continue;
-            send_message(i, &send_worker_request, TERMINATE, source, -1, false, M2W_MESSAGE);
-        }
-        wait_for_message(&send_worker_request);
-        terminated = true;
+        printf("[ERROR] Process %d (manager) received an invalid message type %d from process %d\n", rank, message->type, source);
+        // for (i = 0; i < size; i++) {
+        //     if (i == MANAGER_RANK) continue;
+        //     send_message(i, &send_worker_request, TERMINATE, source, -1, false, M2W_MESSAGE);
+        // }
+        // wait_for_message(&send_worker_request);
+        // terminated = true;
     }
 }
 
@@ -648,10 +648,12 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
         } else {
             printf("[%d] Local queue is empty\n", thread_id);
             fflush(stdout);
-            break;
+            if(omp_get_thread_num() != MANAGER_THREAD) {
+                break;
+            }
         }
     }
-    printf("[%d] Exiting %f\n", thread_id, omp_get_wtime());
+    printf("[%d][%d] Exiting %f\n",rank , thread_id, omp_get_wtime());
 }
 
 /* ------------------ MAIN ------------------ */
@@ -863,7 +865,7 @@ int main(int argc, char** argv) {
     }
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-
+    if(rank == MANAGER_RANK) printf("Input file: %s\n", argv[1]);
     if(rank == MANAGER_RANK) printf("Number of MPI processes: %d\n", size);
     if(rank == MANAGER_RANK) printf("Number of OMP threads: %d\n", omp_get_max_threads());
 

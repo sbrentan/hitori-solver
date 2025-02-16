@@ -664,12 +664,23 @@ int main(int argc, char** argv) {
     
     Board *partials = malloc(num_techniques * sizeof(Board));
 
-    #pragma omp parallel for num_threads(nt)
-    for (i = 0; i < num_techniques; i++) 
+    // #pragma omp parallel for num_threads(nt)
+    // for (i = 0; i < num_techniques; i++) 
+    // {
+    //     if (DEBUG) printf("Technique %d\n", i);
+    //     fflush(stdout);
+    //     partials[i] = techniques[i](board);
+    // }
+    int threads_for_techniques = omp_get_max_threads() > num_techniques ? num_techniques : omp_get_max_threads();
+    #pragma omp parallel num_threads(threads_for_techniques)
     {
-        if (DEBUG) printf("Technique %d\n", i);
-        fflush(stdout);
-        partials[i] = techniques[i](board);
+        #pragma omp single
+        {
+            for (i = 0; i < num_techniques; i++) {
+                #pragma omp task firstprivate(i)
+                partials[i] = techniques[i](board);
+            }
+        }
     }
 
     for (i = 0; i < num_techniques; i++)
