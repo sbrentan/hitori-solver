@@ -1,12 +1,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <omp.h>
 
 #include "../include/pruning.h"
 #include "../include/board.h"
 
-Board openmp_uniqueness_rule(Board board) {
+Board uniqueness_rule(Board board) {
 
     /*
         RULE DESCRIPTION:
@@ -55,7 +54,7 @@ Board openmp_uniqueness_rule(Board board) {
     return solution;
 }
 
-Board openmp_sandwich_rules(Board board) {
+Board sandwich_rules(Board board) {
 
     /*
         RULE DESCRIPTION:
@@ -122,7 +121,7 @@ Board openmp_sandwich_rules(Board board) {
     return solution;
 }
 
-Board openmp_pair_isolation(Board board) {
+Board pair_isolation(Board board) {
 
     /*
         RULE DESCRIPTION:
@@ -202,7 +201,7 @@ Board openmp_pair_isolation(Board board) {
 
 }
 
-Board openmp_flanked_isolation(Board board) {
+Board flanked_isolation(Board board) {
 
     /*
         RULE DESCRIPTION:
@@ -380,7 +379,7 @@ void compute_corner(Board board, int x, int y, CornerType corner_type, int **sol
     }
 }
 
-Board openmp_corner_cases(Board board) {  
+Board corner_cases(Board board) {  
     /*
         RULE DESCRIPTION:
         
@@ -442,7 +441,7 @@ Board openmp_corner_cases(Board board) {
     return solution;
 }
 
-Board openmp_set_white(Board board) {
+Board set_white(Board board) {
     
     /*
         RULE DESCRIPTION:
@@ -489,7 +488,7 @@ Board openmp_set_white(Board board) {
     return solution;
 }
 
-Board openmp_set_black(Board board) {
+Board set_black(Board board) {
     
     /*
         RULE DESCRIPTION:

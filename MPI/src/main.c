@@ -447,13 +447,15 @@ void manager_check_messages() {
         MPI_Testany(size, worker_requests, &sender_id, &flag, &status);
 
         if (flag) {
-            if (DEBUG && status.MPI_SOURCE == -2) {
+            if (status.MPI_SOURCE == -2) {
                 printf("[ERROR] Process %d got -2 in status.MPI_SOURCE (SHOULD NOT HAPPEN)\n", rank);
                 continue;
             }
 
-            if (DEBUG && status.MPI_SOURCE != sender_id)
+            if (status.MPI_SOURCE != sender_id) {
                 printf("[ERROR] Process %d got error in mapping between status.MPI_SOURCE %d and sender_id %d, mapping: %d\n", rank, status.MPI_SOURCE, sender_id, status.MPI_SOURCE);
+                continue;
+            }
 
             // open a new message channel
             receive_message(&worker_messages[sender_id], status.MPI_SOURCE, &worker_requests[sender_id], W2M_MESSAGE);

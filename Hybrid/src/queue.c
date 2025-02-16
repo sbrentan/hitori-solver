@@ -9,7 +9,18 @@ void initializeQueue(Queue* q, int size) {
     q->front = -1;
     q->rear = -1;
     q->size = size;
-    // TODO: free all the items in the queue
+}
+
+void initializeQueueArray(Queue **leaf_queues, int array_size, int queue_size) {
+    *leaf_queues = malloc(array_size * sizeof(Queue));
+    if (*leaf_queues == NULL) {
+        fprintf(stderr, "Memory allocation failed for leaf queues.\n");
+        exit(-1);
+    }
+    int i;
+    for (i = 0; i < array_size; i++) {
+        initializeQueue(&(*leaf_queues)[i], queue_size);
+    }
 }
 
 int isFull(Queue* q) {
@@ -81,23 +92,4 @@ BCB dequeue(Queue* q) {
     }
     // Return the dequeued data
     return data;
-}
-
-void printQueue(Queue* q) {
-    printf("Skipping printing queue");
-    return;
-    // // If the queue is empty, print a message and return
-    // if (isEmpty(q)) {
-    //     printf("Queue is empty\n");
-    //     return;
-    // }
-    // // Print the elements in the queue
-    // printf("Queue elements: ");
-    // int i = q->front;
-    // while (i != q->rear) {
-    //     printf("%d ", q->items[i]);
-    //     i = (i + 1) % SOLUTION_SPACES;
-    // }
-    // // Print the last element
-    // printf("%d\n", q->items[q->rear]);
 }
