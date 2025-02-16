@@ -1,7 +1,17 @@
-# hitori-solver
-Hitori solver parallel application written in C for the High Performance Computing course at University of Trento
+# Parallel HITORI Solver
+Hitori solver parallel application written in C for the High Performance Computing course at University of Trento.
 
-# Usage
+This project was developed through the combined effort of: [Simone Brentan](https://github.com/sbrentan), [Matteo Costalonga](https://github.com/wamuumu), [Alex Reichert](https://github.com/Faerye0)
+
+This repository contains the implementation for a parallel Hitori solver, using both the MPI and OpenMP libraries for C Language.
+The root folder contains:
+* The `MPI` folder, containing a multi-processing hitori solver
+* The `OpenMP` folder, containing a multi-threading hitori solver
+* The `Hybrid` folder, containing an implementation of the parallel hitori leveraging both multi-processing and multi-threaded offered by the **MPI** and **OpenMP** libraries.
+
+Additionally, you can found some referenced documents, the test cases used to validate the algorithm effectiveness and the report that details more about the implementation aspects.
+
+# UNITN Server Connection
 
 Follow these instructions to correctly set up the environment.
 
@@ -60,6 +70,23 @@ qdel job_id     # Cancel a job if it has not yet completed
 
 Note that `job.sh` includes both the PBS directives, which instruct the cluster on how to manage the job, and the necessary 
 details for execution, such as the modules to load (e.g. `mpich`) and the commands to run (e.g. `mpirun.actual ./main.out -n 8`).
+
+## Compile and run the executable in the server
+
+An apposite `makefile` has been write for each of the three main folders. So, to compile and run the Hybrid code, you just need to run:
+```bash
+cd src/Hybrid
+make
+qsub job.sh
+```
+
+## Editable configuration params
+
+The most important editable configuration params are:
+* The number of processes, which can be changed in the executed `job.sh` file.
+* The number of threads per process, which can be changed in the executed `job.sh` file.
+* The `PBS` directives for the UNITN server login node, always indie the `job.sh` file.
+* The number of `SOLUTION_SPACES` that will be generated, which can be changed in the file `src/common.h` inside the folder of the approach you are trying to execute.
 
 # References
 [Menneske](https://www.menneske.no/hitori/methods/eng/index.html)

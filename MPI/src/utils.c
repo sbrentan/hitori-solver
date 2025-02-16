@@ -12,6 +12,11 @@ void write_solution(Board board) {
         Helper function to write the solution to the output file.
     */
 
+    /*
+        Parameters:
+            - board: The board to write the solution.
+    */
+
     FILE *fp = fopen("./output/output.txt", "w");
 
     int i, j;
@@ -36,6 +41,12 @@ void print_vector(int *vector, int size) {
         Helper function to print a vector.
     */
 
+    /*
+        Parameters:
+            - vector: The vector to print.
+            - size: The size of the vector.
+    */
+
     int i;
     for (i = 0; i < size; i++) {
         printf("%d ", vector[i]);
@@ -47,6 +58,13 @@ void print_block(Board board, char *title, BCB* block) {
     
     /*
         Helper function to print the block.
+    */
+
+    /*
+        Parameters:
+            - board: The board.
+            - title: The title of the block.
+            - block: The block to print.
     */
 
     char buffer[MAX_BUFFER_SIZE * 2];
@@ -86,6 +104,11 @@ void free_memory(int *pointers[]) {
         Helper function to free the memory allocated for all the pointers.
     */
 
+    /*
+        Parameters:
+            - pointers: The array of pointers to free.
+    */
+
     int i;
     int size = sizeof(pointers) / sizeof(pointers[0]);
     for (i = 0; i < size; i++) {
@@ -96,7 +119,13 @@ void free_memory(int *pointers[]) {
 void mpi_share_board(Board* board, int rank) {
 
     /*
-        Share the board with all the processes.
+        Share the board with all the processes from the manager process.
+    */
+
+    /*
+        Parameters:
+            - board: The board to share.
+            - rank: The rank of the process.
     */
 
     MPI_Bcast(&board->rows_count, 1, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
@@ -111,7 +140,7 @@ void mpi_share_board(Board* board, int rank) {
     MPI_Bcast(board->solution, board->rows_count * board->cols_count, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
 }
 
-void mpi_scatter_board(Board board, int rank, int size, ScatterType scatter_type, BoardType target_type, int **local_vector, int **counts_send, int **displs_send) {
+void mpi_scatter_board(Board board, int rank, int size, ScatterType scatter_type, BoardType target_type, int **local_vector, int **counts_send, int **displs_send, MPI_Comm PRUNING_COMM) {
 
     /*
         Initialize the counts_send and displs_send arrays:
@@ -173,11 +202,11 @@ void mpi_scatter_board(Board board, int rank, int size, ScatterType scatter_type
     *local_vector = (int *) malloc((*counts_send)[rank] * sizeof(int));
 
     (target_type == BOARD) ?
-        MPI_Scatterv(board.grid, *counts_send, *displs_send, MPI_INT, *local_vector, (*counts_send)[rank], MPI_INT, 0, MPI_COMM_WORLD) :
-        MPI_Scatterv(board.solution, *counts_send, *displs_send, MPI_INT, *local_vector, (*counts_send)[rank], MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Scatterv(board.grid, *counts_send, *displs_send, MPI_INT, *local_vector, (*counts_send)[rank], MPI_INT, 0, PRUNING_COMM) :
+        MPI_Scatterv(board.solution, *counts_send, *displs_send, MPI_INT, *local_vector, (*counts_send)[rank], MPI_INT, 0, PRUNING_COMM);
 }
 
-void mpi_gather_board(Board board, int rank, int *local_vector, int *counts_send, int *displs_send, int **solution) {
+void mpi_gather_board(Board board, int rank, int *local_vector, int *counts_send, int *displs_send, int **solution, MPI_Comm PRUNING_COMM) {
 
     /*
         Gather the local vectors from each process and combine them to get the final solution.
@@ -185,5 +214,5 @@ void mpi_gather_board(Board board, int rank, int *local_vector, int *counts_send
 
     *solution = (int *) malloc(board.rows_count * board.cols_count * sizeof(int));
 
-    MPI_Gatherv(local_vector, counts_send[rank], MPI_INT, *solution, counts_send, displs_send, MPI_INT, MANAGER_RANK, MPI_COMM_WORLD);
+    MPI_Gatherv(local_vector, counts_send[rank], MPI_INT, *solution, counts_send, displs_send, MPI_INT, MANAGER_RANK, PRUNING_COMM);
 }

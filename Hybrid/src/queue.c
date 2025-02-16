@@ -11,6 +11,18 @@ void initializeQueue(Queue* q, int size) {
     q->size = size;
 }
 
+void initializeQueueArray(Queue **leaf_queues, int array_size, int queue_size) {
+    *leaf_queues = malloc(array_size * sizeof(Queue));
+    if (*leaf_queues == NULL) {
+        fprintf(stderr, "Memory allocation failed for leaf queues.\n");
+        exit(-1);
+    }
+    int i;
+    for (i = 0; i < array_size; i++) {
+        initializeQueue(&(*leaf_queues)[i], queue_size);
+    }
+}
+
 int isFull(Queue* q) {
     // If the next position is the front, the queue is full
     return (q->rear + 1) % q->size == q->front;
@@ -31,22 +43,26 @@ bool isEmpty(Queue* q) {
 }
 
 void enqueue(Queue *q, BCB *block) {
-    // If the queue is full, print an error message and return
+    // If the queue is full, print an error message and
+    // return
     if (isFull(q)) {
         printf("Queue overflow\n");
-        exit(-1);
+        return;
     }
-    // If the queue is empty, set the front to the first position
+    // If the queue is empty, set the front to the first
+    // position
     if (q->front == -1) {
         q->front = 0;
     }
     // Add the data to the queue and move the rear pointer
     q->rear = (q->rear + 1) % q->size;
     q->items[q->rear] = *block;
+    //printf("Element %lld inserted\n", value);
 }
 
 BCB peek(Queue* q) {
-    // If the queue is empty, print an error message and return -1
+    // If the queue is empty, print an error message and
+    // return -1
     if (isEmpty(q)) {
         printf("Queue underflow\n");
         exit(-1);
@@ -56,19 +72,22 @@ BCB peek(Queue* q) {
 }
 
 BCB dequeue(Queue* q) {
-    // If the queue is empty, print an error message and return -1
+    // If the queue is empty, print an error message and
+    // return -1
     if (isEmpty(q)) {
         printf("Queue underflow\n");
         exit(-1);
     }
     // Get the data from the front of the queue
     BCB data = q->items[q->front];
-    // If the front and rear pointers are at the same position, reset them
+    // If the front and rear pointers are at the same
+    // position, reset them
     if (q->front == q->rear) {
         q->front = q->rear = -1;
     }
     else {
-        // Otherwise, move the front pointer to the next position
+        // Otherwise, move the front pointer to the next
+        // position
         q->front = (q->front + 1) % q->size;
     }
     // Return the dequeued data

@@ -6,25 +6,9 @@
 
 bool is_cell_state_valid(Board board, BCB* block, int x, int y, CellState cell_state) {
 
-    /*
-        This function checks if the cell state is valid according to the Hitori rules.
-    */
+    // Rule 1: No unshaded number appears in a row or column more than once
+    // Rule 2: Shaded cells cannot be adjacent, although they can touch at a corner
 
-    /*
-        Parameters:
-            board: The board of the Hitori puzzle
-            block: The block of the Hitori puzzle which solution is being checked
-            x: The row index of the cell
-            y: The column index of the cell
-            cell_state: The state of the cell (BLACK or WHITE) that is being checked
-    */
-
-    /*
-        Hitori Rules:
-            Rule 1: No unshaded number appears in a row or column more than once
-            Rule 2: Shaded cells cannot be adjacent, although they can touch at a corner
-    */
-    
     if (cell_state == BLACK) {
         if (x > 0 && block->solution[(x - 1) * board.cols_count + y] == BLACK) return false;
         if (x < board.rows_count - 1 && block->solution[(x + 1) * board.cols_count + y] == BLACK) return false;

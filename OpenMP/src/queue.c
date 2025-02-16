@@ -11,6 +11,18 @@ void initializeQueue(Queue* q, int size) {
     q->size = size;
 }
 
+void initializeQueueArray(Queue **leaf_queues, int array_size, int queue_size) {
+    *leaf_queues = malloc(array_size * sizeof(Queue));
+    if (*leaf_queues == NULL) {
+        fprintf(stderr, "Memory allocation failed for leaf queues.\n");
+        exit(-1);
+    }
+    int i;
+    for (i = 0; i < array_size; i++) {
+        initializeQueue(&(*leaf_queues)[i], queue_size);
+    }
+}
+
 int isFull(Queue* q) {
     // If the next position is the front, the queue is full
     return (q->rear + 1) % q->size == q->front;
@@ -43,16 +55,6 @@ void enqueue(Queue *q, BCB *block) {
     // Add the data to the queue and move the rear pointer
     q->rear = (q->rear + 1) % q->size;
     q->items[q->rear] = *block;
-}
-
-BCB peek(Queue* q) {
-    // If the queue is empty, print an error message and return -1
-    if (isEmpty(q)) {
-        printf("Queue underflow\n");
-        exit(-1);
-    }
-    // Return the front element
-    return q->items[q->front];
 }
 
 BCB dequeue(Queue* q) {

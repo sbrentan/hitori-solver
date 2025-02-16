@@ -3,13 +3,13 @@
 
 #include <stdbool.h>
 
-#define DEBUG 0                                 // Debug flag
+#define DEBUG 1                                 // Debug flag
 #define INPUT_PATH "../test-cases/inputs/"      // Path to the input files
 #define MAX_BUFFER_SIZE 2048                    // Maximum buffer size for reading the input file
 #define SOLUTION_SPACES 8                       // Number of solution spaces
 #define MANAGER_RANK 0                          // Rank of the manager process
-#define PRUNING_WORKERS 4                       // Number of workers that will be used for pruning
-#define MAX_MSG_SIZE 10
+#define MANAGER_THREAD 0                        // Manager thread of a process
+#define MAX_MSG_SIZE 10                         
 
 // MPI_Messages tags definition
 #define W2M_MESSAGE 0                           // Message from worker to manager

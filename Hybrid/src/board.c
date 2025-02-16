@@ -155,35 +155,12 @@ Board transpose(Board board) {
     return Tboard;
 }
 
-Board combine_boards(Board first_board, Board second_board, bool forced, int rank, char *technique, MPI_Comm PRUNING_COMM) {
+Board combine_boards(Board first_board, Board second_board, bool forced, char *technique) {
     
-    /*
-        Helper function to combine two boards.
-    */
-
-    /*
-        Parameters:
-            - first_board: the first board to be combined
-            - second_board: the second board to be combined
-            - forced: if the technique is forced, the values must be the same
-            - rank: the rank of the process
-            - technique: the name of the technique
-            - PRUNING_COMM: the MPI communicator dedicated to the pruning workers
-    */
-
     int rows = -1, cols = -1;
 
-    if (rank == MANAGER_RANK) {
-        rows = first_board.rows_count;
-        cols = first_board.cols_count;
-    }
-
-    /*
-        Broadcast the dimensions of the boards.
-    */
-
-    MPI_Bcast(&rows, 1, MPI_INT, MANAGER_RANK, PRUNING_COMM);
-    MPI_Bcast(&cols, 1, MPI_INT, MANAGER_RANK, PRUNING_COMM);
+    rows = first_board.rows_count;
+    cols = first_board.cols_count;
 
     /*
         Initialize the solution board with the values of the original board.
@@ -191,41 +168,29 @@ Board combine_boards(Board first_board, Board second_board, bool forced, int ran
 
     Board merged = { (int *) malloc(rows * cols * sizeof(int)), rows, cols, (int *) malloc(rows * cols * sizeof(int)) };
 
-    if (rank == MANAGER_RANK) merged.grid = first_board.grid;
-
-    MPI_Bcast(merged.grid, rows * cols, MPI_INT, MANAGER_RANK, PRUNING_COMM);
+    merged.grid = first_board.grid;
 
     /*
         Combine the solutions by performing a pairwise comparison:
-            1) If the values are the same, keep the value
-            2) If only one value is unknown, keep the known value
-            3) If the values are different, leave the cell as unknown
-        
-        Forced techniques must require the values to be the same.
+        1) If the values are the same, keep the value
+        2) If only one value is unknown, keep the known value
+        3) If the values are different, leave the cell as unknown
     */
 
-    if (rank == MANAGER_RANK) {
+    memset(merged.solution, UNKNOWN, rows * cols * sizeof(int));
 
-        memset(merged.solution, UNKNOWN, rows * cols * sizeof(int));
-
-        int i, j;
-        for (i = 0; i < rows; i++) {
-            for (j = 0; j < cols; j++) {
-                if (first_board.solution[i * cols + j] == second_board.solution[i * cols + j]) 
-                    merged.solution[i * cols + j] = first_board.solution[i * cols + j];
-                else if (!forced && first_board.solution[i * cols + j] == UNKNOWN && second_board.solution[i * cols + j] != UNKNOWN) 
-                    merged.solution[i * cols + j] = second_board.solution[i * cols + j];
-                else if (!forced && first_board.solution[i * cols + j] != UNKNOWN && second_board.solution[i * cols + j] == UNKNOWN) 
-                    merged.solution[i * cols + j] = first_board.solution[i * cols + j];
-            }   
-        }
-    }
-
-    /*
-        Broadcast the merged solution.
-    */
+    int i, j;
     
-    MPI_Bcast(merged.solution, rows * cols, MPI_INT, MANAGER_RANK, PRUNING_COMM);
+    for (i = 0; i < rows; i++) {
+        for (j = 0; j < cols; j++) {
+            if (first_board.solution[i * cols + j] == second_board.solution[i * cols + j]) 
+                merged.solution[i * cols + j] = first_board.solution[i * cols + j];
+            else if (first_board.solution[i * cols + j] == UNKNOWN && second_board.solution[i * cols + j] != UNKNOWN) 
+                merged.solution[i * cols + j] = second_board.solution[i * cols + j];
+            else if (first_board.solution[i * cols + j] != UNKNOWN && second_board.solution[i * cols + j] == UNKNOWN) 
+                merged.solution[i * cols + j] = first_board.solution[i * cols + j];
+        }   
+    }
 
     return merged;
 }
