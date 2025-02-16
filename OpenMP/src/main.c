@@ -203,7 +203,14 @@ bool hitori_openmp_solution() {
                 // Distribute the blocks to the threads
                 for (j = 0; j < blocks_per_thread; j++) {
                     BCB new_block, block = dequeue(&solution_queue);
-                    memcpy(&new_block, &block, sizeof(BCB));
+                    
+                    BCB new_block = {
+                        .solution = malloc(board.rows_count * board.cols_count * sizeof(CellState)),
+                        .solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool))
+                    };
+
+                    memcpy(new_block.solution, block.solution, board.rows_count * board.cols_count * sizeof(CellState));
+                    memcpy(new_block.solution_space_unknowns, block.solution_space_unknowns, board.rows_count * board.cols_count * sizeof(bool));
 
                     enqueue(&solution_queue, &block);
                     enqueue(&leaf_queues[i], &new_block);

@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-#define DEBUG 0                                 // Debug flag
+#define DEBUG 1                                 // Debug flag
 #define INPUT_PATH "../test-cases/inputs/"      // Path to the input files
 #define MAX_BUFFER_SIZE 2048                    // Maximum buffer size for reading the input file
 #define SOLUTION_SPACES 8                       // Number of solution spaces

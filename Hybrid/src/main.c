@@ -205,7 +205,7 @@ void manager_consume_message(Message *message, int source) {
     if (message->type == TERMINATE) {
         // Send termination message to all the workers, except for itself
         for (i = 0; i < size; i++) {
-            if (i == MANAGER_RANK || i == message->data1) continue;
+            if (i == MANAGER_RANK) continue;
             send_message(i, &send_worker_request, TERMINATE, source, -1, false, M2W_MESSAGE);
         }
         terminated = true;
@@ -524,8 +524,15 @@ bool hitori_hybrid_solution() {
 
                     // Distribute the blocks to the threads
                     for (j = 0; j < blocks_per_thread; j++) {
-                        BCB new_block, block = dequeue(&solution_queue);
-                        memcpy(&new_block, &block, sizeof(BCB));
+                        BCB block = dequeue(&solution_queue);
+
+                        BCB new_block = {
+                            .solution = malloc(board.rows_count * board.cols_count * sizeof(CellState)),
+                            .solution_space_unknowns = malloc(board.rows_count * board.cols_count * sizeof(bool))
+                        };
+
+                        memcpy(new_block.solution, block.solution, board.rows_count * board.cols_count * sizeof(CellState));
+                        memcpy(new_block.solution_space_unknowns, block.solution_space_unknowns, board.rows_count * board.cols_count * sizeof(bool));
 
                         enqueue(&solution_queue, &block);
                         enqueue(&leaf_queues[i], &new_block);
