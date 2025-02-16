@@ -202,7 +202,7 @@ bool hitori_openmp_solution() {
 
                 // Distribute the blocks to the threads
                 for (j = 0; j < blocks_per_thread; j++) {
-                    BCB new_block, block = dequeue(&solution_queue);
+                    BCB block = dequeue(&solution_queue);
                     
                     BCB new_block = {
                         .solution = malloc(board.rows_count * board.cols_count * sizeof(CellState)),
