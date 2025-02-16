@@ -102,6 +102,7 @@ void receive_message(Message *message, int source, MPI_Request *request, int tag
         //     printf("[ERROR] Process %d got -2 in status.MPI_SOURCE\n", rank);
         MPI_Irecv(message, 1, MPI_MESSAGE, source, tag, MPI_COMM_WORLD, request);
     }
+    printf("[INFO] Process %d received a message from process %d with tag %d\n", rank, source, tag);
 }
 
 int message_index = 0, message_queue_size = 10;
@@ -502,6 +503,7 @@ void manager_check_messages() {
         printf("[ERROR] Manager %d got invalid thread number %d\n", rank, omp_get_thread_num());
         return;
     }
+    // printf("[INFO] Process %d (manager) checking messages\n", rank);
     int flag = 1, sender_id = -1;
     MPI_Status status;
     while(flag) {
@@ -587,7 +589,7 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
     }
 
     int queue_size = getQueueSize(&local_queue);
-    printf("[%d] Local queue size: %d %f\n", thread_id, queue_size, omp_get_wtime());
+    printf("[%d][%d] Local queue size: %d %f\n",rank, thread_id, queue_size, omp_get_wtime());
     fflush(stdout);
     if (queue_size > 1 && solutions_to_skip > 0) {
         printf("[%d] ERROR: More than one block in local queue\n", thread_id);
@@ -595,6 +597,7 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
     }
 
     // int queue_size;
+
     while(!terminated) {
         
         if (omp_get_thread_num() == MANAGER_THREAD) {
@@ -604,7 +607,7 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
 
         queue_size = getQueueSize(&local_queue);
         if (terminated) {
-            if (DEBUG) printf("[%d] Terminated\n", thread_id);
+            printf("[%d][%d] Terminated\n",rank , thread_id);
             fflush(stdout);
             break;
         }
@@ -622,8 +625,8 @@ void task_find_solution_final(int thread_id, int threads_in_solution_space, int 
                     memcpy(board.solution, current.solution, board.rows_count * board.cols_count * sizeof(CellState));
 
                     printf("[%d] [%d] Solution found %f\n", rank, thread_id, omp_get_wtime());
-                    // #pragma omp atomic write
-                    // terminated = true;
+                    if(size == 1)
+                        terminated = true;
                     fflush(stdout);
 
                     if (omp_get_thread_num() == MANAGER_THREAD) continue;
@@ -825,6 +828,7 @@ bool hitori_mpi_solution() {
                     count++;
                 }
             } else {
+
                 printf("[ERROR] Process %d has no solution spaces\n", rank);
                 fflush(stdout);
             }
@@ -835,6 +839,13 @@ bool hitori_mpi_solution() {
                 //         worker_check_messages(&solution_queue);
                 //     }
                 // }
+        }
+        
+        if (rank == MANAGER_RANK && omp_get_thread_num() == MANAGER_THREAD) {
+            while(!terminated){
+                worker_check_messages();
+                manager_check_messages();
+            }
         }
     }
 
