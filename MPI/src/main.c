@@ -533,7 +533,7 @@ bool hitori_mpi_solution() {
                 count--;
             }
         } else {
-            printf("Processor %d failed to find a leaf\n", rank);
+            if(DEBUG) printf("Processor %d failed to find a leaf\n", rank);
         }
     }
 
